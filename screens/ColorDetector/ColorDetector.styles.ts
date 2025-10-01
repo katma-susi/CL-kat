@@ -12,7 +12,7 @@ export const styles = StyleSheet.create({
   backText: { fontSize: rf(20), fontWeight: '700', color: '#fff' },
   settingsButton: { paddingVertical: rf(8), paddingHorizontal: rf(8), borderRadius: 6, minWidth: rf(44), minHeight: rf(44), justifyContent: 'center', alignItems: 'center' },
   settingsText: { fontSize: rf(20) },
-  // Camera area holds the preview and crosshair. position: 'relative' so absolute children are positioned correctly.
+  // Caamera area holds the preview and crosshair. position: 'relative' so absolute children are positioned correctly.
   // Camera area holds the preview and crosshair. position: 'relative' so absolute children are positioned correctly.
   // Add horizontal padding so the preview sits visually centered with even white space.
   cameraArea: { flex: 1, justifyContent: 'flex-start', alignItems: 'center', backgroundColor: '#fff', position: 'relative', paddingTop: rf(8), paddingHorizontal: rf(12) },
