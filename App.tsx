@@ -70,7 +70,6 @@ const App: React.FC = () => {
             voiceMode={voiceMode}
             showFamily={showFamily}
             showRealName={showRealName}
-            onToggleVoice={(v: boolean) => setVoiceEnabled(v)}
             onToggleColorCodes={(v: boolean) => setColorCodesVisible(v)}
             onToggleShowFamily={(v: boolean) => setShowFamily(v)}
             onToggleShowRealName={(v: boolean) => setShowRealName(v)}
