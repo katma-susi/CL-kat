@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
+    "react-native": "react-native",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
@@ -13,6 +14,9 @@
     "@react-native/new-app-screen": "0.81.4",
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-react-native": "^1.0.0",
+    "buffer": "^6.0.3",
+    "colorjs.io": "^0.5.2",
+    "jpeg-js": "^0.4.4",
     "react": "19.1.0",
     "react-native": "0.81.4",
     "react-native-fs": "^2.20.0",
@@ -20,7 +24,8 @@
     "react-native-safe-area-context": "^5.6.1",
     "react-native-tts": "^4.1.1",
     "react-native-vision-camera": "^4.7.2",
-    "react-native-webview": "^13.16.0"
+    "react-native-webview": "^13.16.0",
+    "react-native-worklets-core": "^1.6.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

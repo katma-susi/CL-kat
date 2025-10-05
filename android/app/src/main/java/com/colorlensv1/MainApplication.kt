@@ -18,6 +18,12 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               // Packages that cannot be autolinked yet can be added manually here, for example:
               // add(MyReactNativePackage())
+              // register our ImageDecoderPackage to provide a native scaled decoder
+              try {
+                add(ImageDecoderPackage())
+              } catch (_: Exception) {
+                // ignore if registration fails on some build setups
+              }
             }
 
         override fun getJSMainModuleName(): String = "index"

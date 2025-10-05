@@ -60,4 +60,12 @@ export const styles = StyleSheet.create({
   adjustText: { color: '#6A0DAF', fontWeight: '700', fontSize: rf(15) },
   adjustHelp: { marginTop: rf(8), paddingHorizontal: rf(12), backgroundColor: '#FF8C2B', paddingVertical: rf(10), borderRadius: 8, alignSelf: 'stretch' },
   adjustHelpText: { color: '#fff', fontSize: rf(14), textAlign: 'left', fontWeight: '600' },
+  // Swatch overlay in preview (top-right corner)
+  swatchContainer: { position: 'absolute', right: rf(12), top: rf(12), backgroundColor: 'rgba(255,255,255,0.97)', padding: rf(8), borderRadius: rf(8), flexDirection: 'row', alignItems: 'center', elevation: 10, borderWidth: 1, borderColor: '#DDD', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 6 },
+  swatchBox: { width: rf(44), height: rf(44), borderRadius: rf(6), borderWidth: 1, borderColor: '#DDD', marginRight: rf(8) },
+  swatchText: { fontSize: rf(13), color: '#111', fontWeight: '600' },
+  swatchRoot: { position: 'absolute', right: rf(12), top: rf(12), zIndex: 9999, elevation: 20 },
+  // TTS toast: small translucent bar near the top center
+  ttsToastContainer: { position: 'absolute', left: 20, right: 20, top: rf(10), alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingVertical: rf(8), paddingHorizontal: rf(12), borderRadius: rf(8), zIndex: 99999, elevation: 30 },
+  ttsToastText: { color: '#fff', fontSize: rf(14), fontWeight: '600' },
 });

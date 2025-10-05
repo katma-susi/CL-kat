@@ -1,6 +1,14 @@
 pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> 
+	try {
+		ex.autolinkLibrariesFromCommand()
+	} catch (e) {
+		// Autolink failed for some environments (node not on PATH for Gradle's cmd).
+		// Fall back to letting the normal autolink mechanism run later without aborting the build.
+		println("[settings.gradle] Warning: autolinkLibrariesFromCommand failed: " + e.message)
+	}
+}
 rootProject.name = 'ColorLensv1'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
