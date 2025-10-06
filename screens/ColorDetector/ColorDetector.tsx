@@ -5,7 +5,7 @@ let captureRef: any = null;
 try { captureRef = require('react-native-view-shot').captureRef; } catch (_e) { captureRef = null; }
 import { ICONS } from '../../Images';
 import { styles } from './ColorDetector.styles';
-import { getRandomColor } from './ColorDetectorLogic';
+import { getFallbackColor, getJpegUtils, getJpegOrientation, hexToRgb, decodeJpegAndSampleCenter, decodeJpegAndSampleAt } from './ColorDetectorLogic';
 import { findClosestColor } from '../../services/ColorMatcher';
 import { findClosestColorAsync } from '../../services/ColorMatcherWorker';
 import { speak, initTts, stop as stopTts } from '../../utils/tts';
@@ -36,103 +36,7 @@ try {
 }
 // Only print the disabled message once to avoid log spam
 const _frameProcessorDisabledLogged = { value: false } as any;
-// image decoder libs (node/browser compatible shims installed via yarn)
-// Lazy getter for jpeg decode utilities to avoid allocating/loading them at module import time
-const getJpegUtils = () => {
-  try {
-    // require when actually decoding to reduce startup memory usage
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const jpegjsLocal = require('jpeg-js');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const BufferLocal = require('buffer').Buffer;
-    return { jpegjs: jpegjsLocal, BufferShim: BufferLocal };
-  } catch (_e) {
-    return { jpegjs: null, BufferShim: null };
-  }
-};
-
-// Read EXIF Orientation from a JPEG Buffer (returns 1..8 or 1 if unknown)
-const getJpegOrientation = (buf: any): number => {
-  try {
-    // Ensure we have a Uint8Array view
-    let arr: Uint8Array;
-    if (buf && typeof buf === 'object' && typeof buf.length === 'number' && typeof buf[0] === 'number') {
-      arr = buf;
-    } else if (buf && typeof buf === 'object' && (buf as any).toString && (buf as any).toString() === '[object Uint8Array]') {
-      arr = buf as Uint8Array;
-    } else if (buf && typeof (buf as any).toArray === 'function') {
-      arr = (buf as any).toArray();
-    } else {
-      // try Buffer -> Uint8Array
-      try { arr = new Uint8Array(buf); } catch (_e) { return 1; }
-    }
-    if (arr.length < 4) return 1;
-    // check SOI
-    if (arr[0] !== 0xFF || arr[1] !== 0xD8) return 1;
-    let offset = 2;
-    while (offset < arr.length) {
-      if (arr[offset] !== 0xFF) break;
-      const marker = arr[offset + 1];
-      // APP1 marker
-      if (marker === 0xE1) {
-        const len = (arr[offset + 2] << 8) + arr[offset + 3];
-        // Exif header starts at offset+4
-        const exifStart = offset + 4;
-        // check "Exif\0\0"
-        if (exifStart + 6 <= arr.length) {
-          if (arr[exifStart] === 0x45 && arr[exifStart + 1] === 0x78 && arr[exifStart + 2] === 0x69 && arr[exifStart + 3] === 0x66 && arr[exifStart + 4] === 0x00 && arr[exifStart + 5] === 0x00) {
-            // TIFF header starts at exifStart + 6
-            const tiffOffset = exifStart + 6;
-            const isLittle = arr[tiffOffset] === 0x49 && arr[tiffOffset + 1] === 0x49;
-            const readUint16 = (off: number) => isLittle ? (arr[off] + (arr[off+1]<<8)) : ((arr[off]<<8) + arr[off+1]);
-            const readUint32 = (off: number) => isLittle ? (arr[off] + (arr[off+1]<<8) + (arr[off+2]<<16) + (arr[off+3]<<24)) : ((arr[off]<<24) + (arr[off+1]<<16) + (arr[off+2]<<8) + arr[off+3]);
-            // check magic number 0x002A
-            const magic = readUint16(tiffOffset + 2);
-            if (magic !== 0x002A && magic !== 42) return 1;
-            const ifdOffset = readUint32(tiffOffset + 4);
-            let dirStart = tiffOffset + ifdOffset;
-            if (dirStart + 2 > arr.length) return 1;
-            const entries = readUint16(dirStart);
-            dirStart += 2;
-            for (let i = 0; i < entries; i++) {
-              const entryOffset = dirStart + i * 12;
-              if (entryOffset + 12 > arr.length) break;
-              const tag = readUint16(entryOffset);
-              if (tag === 0x0112) {
-                // orientation tag
-                const type = readUint16(entryOffset + 2);
-                const count = readUint32(entryOffset + 4);
-                let valueOff = entryOffset + 8;
-                let val = 0;
-                if (type === 3 && count === 1) {
-                  // short in-place
-                  val = readUint16(valueOff);
-                } else {
-                  const actualValOffset = tiffOffset + readUint32(valueOff);
-                  if (actualValOffset + 2 <= arr.length) val = readUint16(actualValOffset);
-                }
-                if (val >= 1 && val <= 8) return val;
-                return 1;
-              }
-            }
-          }
-        }
-        // move past this marker
-        offset += 2 + len;
-        continue;
-      } else {
-        // other marker: has length
-        if (offset + 4 > arr.length) break;
-        const len = (arr[offset + 2] << 8) + arr[offset + 3];
-        offset += 2 + len;
-        continue;
-      }
-    }
-  } catch (_e) {
-    // ignore
-  }
-  return 1;
-};
+// Helpers moved into ColorDetectorLogic.ts. Use imports at top of file.
 
 // Crosshair config: tweak these to change length (factor of preview), thickness (px), and dot size
 const CROSSHAIR_LENGTH_FACTOR = 0.5; // 0..1 portion of preview dimension (0.5 = 50%)
@@ -585,7 +489,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         // Try a lightweight snapshot/sample; if that fails, fall back to a synthetic random sample
         processSnapshotAndSample().then((ok) => {
           if (!ok) {
-            const c = getRandomColor();
+            const c = getFallbackColor();
             try {
               const rgb = hexToRgb(c.hex);
               const match = findClosestColor(rgb, 3);
@@ -596,7 +500,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
             }
           }
         }).catch(() => {
-          const c = getRandomColor();
+          const c = getFallbackColor();
           try {
             const rgb = hexToRgb(c.hex);
             const match = findClosestColor(rgb, 3);
@@ -872,7 +776,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                     debugLog('[ColorDetector] onScreenPress: captureAndSampleAt returned null, falling back to random');
                     // fallback to random match (existing behavior)
                     try {
-                      const sampled = getRandomColor();
+                      const sampled = getFallbackColor();
                       const rgb = hexToRgb(sampled.hex);
                       const match = findClosestColor(rgb, 3);
                       const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -880,7 +784,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                       setFrozenSnapshot(c);
                       selectedSample = c;
                     } catch (err) {
-                      const c = getRandomColor();
+                      const c = getFallbackColor();
                       setDetected(c);
                       setFrozenSnapshot(c);
                       selectedSample = c;
@@ -890,7 +794,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                   debugLog('[ColorDetector] onScreenPress: captureAndSampleAt threw', _err);
                   // on capture failure, fallback to previous behavior
                   try {
-                    const sampled = getRandomColor();
+                    const sampled = getFallbackColor();
                     const rgb = hexToRgb(sampled.hex);
                     const match = findClosestColor(rgb, 3);
                     const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -898,7 +802,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                     setFrozenSnapshot(c);
                     selectedSample = c;
                   } catch (err) {
-                    const c = getRandomColor();
+                    const c = getFallbackColor();
                     setDetected(c);
                     setFrozenSnapshot(c);
                     selectedSample = c;
@@ -935,7 +839,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
             // ensure we always speak/fallback even if promise rejects
             try {
               debugLog('[ColorDetector] onScreenPress: promise chain rejected, falling back ->', _err);
-              const sampled = getRandomColor();
+              const sampled = getFallbackColor();
               setDetected(sampled);
               setFrozenSnapshot(sampled);
               if (voiceEnabled && voiceMode !== 'disable') {
@@ -1049,21 +953,23 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                 // ignore RNFS fallback errors
               }
 
-              // If still no sample, fallback to random to avoid blank UI
+              // If still no sample, keep the uploaded image but do not freeze or show a fallback.
+              // This avoids immediately speaking/setting 'Unknown'. The user can tap to sample manually.
               if (!selectedSample) {
-                const sampled = getRandomColor();
-                setDetected(sampled);
-                setFrozenSnapshot(sampled);
-                setFreeze(true);
-                selectedSample = sampled;
+                debugLog('[ColorDetector] pickImage: no sample found during initial auto-sample; leaving uploaded image active without freezing');
+                // Ensure no detected/frozen snapshot is set so UI shows the uploaded image but no sampled color
+                setDetected(null);
+                setFrozenSnapshot(null);
+                // do not setFreeze(true)
+                selectedSample = null;
               }
             }
           } catch (err) {
-            const sampled = getRandomColor();
-            setDetected(sampled);
-            setFrozenSnapshot(sampled);
-            setFreeze(true);
-            selectedSample = sampled;
+            debugLog('[ColorDetector] pickImage: error while sampling uploaded image', err);
+            // Don't set a fallback sample; leave the uploaded image un-frozen and let the user tap to sample
+            setDetected(null);
+            setFrozenSnapshot(null);
+            selectedSample = null;
           }
           // speak sample immediately if allowed
           if (voiceEnabled && voiceMode !== 'disable' && selectedSample) {
@@ -1768,12 +1674,12 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           try { safeSpeak(voiceMode === 'real' ? c.realName : c.family); } catch (_e) {}
         }
       } else {
-        const sampled = getRandomColor();
+  const sampled = getFallbackColor();
         setDetected(sampled);
         setFrozenSnapshot(sampled);
       }
     }).catch((_err: any) => {
-      const sampled = getRandomColor();
+  const sampled = getFallbackColor();
       setDetected(sampled);
       setFrozenSnapshot(sampled);
     });
