@@ -106,6 +106,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   // toast shown when we invoke TTS to help debug silent TTS
   const [ttsToast, setTtsToast] = useState<string | null>(null);
   const ttsToastTimer = useRef<any>(null);
+  // Suppress automatic live speech around capture to avoid audio being cut by camera lifecycle
+  const suppressSpeechRef = useRef<boolean>(false);
   // throttle live speech so we don't spam the user when live detection updates rapidly
   const lastSpokenRef = useRef<number>(0);
   const LIVE_SPEAK_COOLDOWN = 1200; // ms
@@ -125,7 +127,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
 
   // safeSpeak: show a short on-screen toast then call the project's speak() helper.
   // Returns whatever speak() returns (may be boolean or a Promise).
-  const safeSpeak = (text: string) => {
+  const safeSpeak = (text: string, opts?: { force?: boolean }) => {
+    try { if (suppressSpeechRef.current && !(opts && opts.force)) { debugLog('[ColorDetector] safeSpeak suppressed ->', text); return false; } } catch (_e) {}
     try { debugLog('[ColorDetector] safeSpeak invoked ->', text); } catch (_e) {}
     try {
       // show short toast with requested text
@@ -137,7 +140,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       ttsToastTimer.current = setTimeout(() => { try { setTtsToast(null); } catch (_e) {} }, 1300);
     } catch (_e) {}
     try {
-      const res = speak(text);
+  const res = speak(text);
       try { debugLog('[ColorDetector] safeSpeak called utils.speak ->', res); } catch (_e) {}
       return res;
     } catch (err) {
@@ -496,6 +499,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     const next = !freeze;
     setFreeze(next);
     freezeRef.current = next;
+    // when starting a freeze, suppress automatic live speech while we capture
+    if (next) suppressSpeechRef.current = true;
     // immediate toast to indicate freeze/unfreeze action
     try { if (ttsToastTimer.current) clearTimeout(ttsToastTimer.current); } catch (_e) {}
     try { setTtsToast(next ? 'Freezing frame...' : 'Resuming live'); } catch (_e) {}
@@ -558,10 +563,25 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                     try { debugLog('[ColorDetector] toggleFreeze setting toast ->', textToSpeak); } catch (_e) {}
                     setTtsToast(textToSpeak);
                     ttsToastTimer.current = setTimeout(() => { try { setTtsToast(null); } catch (_e) {} }, 1300);
-                    const maybe = safeSpeak(textToSpeak);
-                    Promise.resolve(maybe).then((ok) => {
-                      if (!ok) Alert.alert('Color', textToSpeak);
-                    }).catch(() => { Alert.alert('Color', textToSpeak); });
+                    // Attempt forced speak twice (short retry) to improve chance audio plays
+                    setTimeout(() => {
+                      try {
+                        const maybe = safeSpeak(textToSpeak, { force: true });
+                        Promise.resolve(maybe).then((ok) => {
+                          if (!ok) Alert.alert('Color', textToSpeak);
+                        }).catch(() => { Alert.alert('Color', textToSpeak); });
+                      } catch (_e) { try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
+                    }, 400);
+                    setTimeout(() => {
+                      try {
+                        const maybe2 = safeSpeak(textToSpeak, { force: true });
+                        Promise.resolve(maybe2).then((ok) => {
+                          if (!ok) Alert.alert('Color', textToSpeak);
+                        }).catch(() => { Alert.alert('Color', textToSpeak); });
+                      } catch (_e) { try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
+                    }, 900);
+                    // clear suppression after retries
+                    setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 1000);
                   } catch (_e) {
                     try { Alert.alert('Color', textToSpeak); } catch (_e2) {}
                   }
@@ -579,10 +599,23 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                           try { debugLog('[ColorDetector] toggleFreeze (fallback) setting toast ->', textToSpeak); } catch (_e) {}
                           setTtsToast(textToSpeak);
                           ttsToastTimer.current = setTimeout(() => { try { setTtsToast(null); } catch (_e) {} }, 1300);
-                          const maybe = safeSpeak(textToSpeak);
-                          Promise.resolve(maybe).then((ok) => {
-                            if (!ok) Alert.alert('Color', textToSpeak);
-                          }).catch(() => { Alert.alert('Color', textToSpeak); });
+                          setTimeout(() => {
+                            try {
+                              const maybe = safeSpeak(textToSpeak, { force: true });
+                              Promise.resolve(maybe).then((ok) => {
+                                if (!ok) Alert.alert('Color', textToSpeak);
+                              }).catch(() => { Alert.alert('Color', textToSpeak); });
+                            } catch (_e) { try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
+                          }, 400);
+                          setTimeout(() => {
+                            try {
+                              const maybe2 = safeSpeak(textToSpeak, { force: true });
+                              Promise.resolve(maybe2).then((ok) => {
+                                if (!ok) Alert.alert('Color', textToSpeak);
+                              }).catch(() => { Alert.alert('Color', textToSpeak); });
+                            } catch (_e) { try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
+                          }, 900);
+                          setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 1000);
                         } catch (_e) {
                           try { Alert.alert('Color', textToSpeak); } catch (_e2) {}
                         }
@@ -1792,6 +1825,10 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
 
         {/* Info */}
         <View style={styles.infoArea}>
+          {/* Inline swatch placed under the preview (no text inside) */}
+          <View style={styles.inlineSwatchRow}>
+            <View style={[styles.swatchBoxLarge, { backgroundColor: displayDetected?.hex || '#000' }]} />
+          </View>
           {showFamily && (
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Family of:</Text>
@@ -1829,21 +1866,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         </TouchableOpacity>
         {/* end info area */}
       </View>
-    {/* Top-level swatch overlay so it's always visible above the preview */}
-    <View pointerEvents="box-none" style={styles.swatchRoot}>
-      <TouchableOpacity activeOpacity={0.9} onPress={() => {
-        try {
-          const hex = displayDetected?.hex || '#000000';
-          try { require('react-native').Clipboard && (require('react-native').Clipboard as any).setString(hex); } catch (_e) {}
-        } catch (_e) {}
-      }} style={styles.swatchContainer}>
-        <View style={[styles.swatchBox, { backgroundColor: displayDetected?.hex || '#000' }]} />
-        <View>
-          <Text style={styles.swatchText}>{displayDetected?.hex ?? '—'}</Text>
-          <Text style={[styles.swatchText, { fontSize: 12 }]} numberOfLines={1}>{displayDetected?.family ?? displayDetected?.realName ?? '—'}</Text>
-        </View>
-      </TouchableOpacity>
-    </View>
+    {/* old swatch overlay removed - inline swatch used instead */}
     </View>
   );
 };
