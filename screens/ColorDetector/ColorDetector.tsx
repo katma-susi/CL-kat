@@ -1915,8 +1915,12 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                   {uploadDebug && (() => {
                     const viewLeft = Math.round((previewSize.width - imageScaledSize.w) / 2);
                     const viewTop = Math.round((previewSize.height - imageScaledSize.h) / 2);
-                    const dotLeft = Math.round(uploadDebug.mappedPreviewX - viewLeft - (uploadDebug.mappedPreviewX ? 0 : 0));
-                    const dotTop = Math.round(uploadDebug.mappedPreviewY - viewTop - (uploadDebug.mappedPreviewY ? 0 : 0));
+                    // account for current pan transform so the overlay dot aligns with the visible image
+                    let panX = 0, panY = 0;
+                    try { panX = (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0; } catch (_e) { panX = 0; }
+                    try { panY = (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0; } catch (_e) { panY = 0; }
+                    const dotLeft = Math.round(uploadDebug.mappedPreviewX - viewLeft - panX);
+                    const dotTop = Math.round(uploadDebug.mappedPreviewY - viewTop - panY);
                     return (
                       <View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, width: imageScaledSize.w, height: imageScaledSize.h }}>
                         {/* border showing the scaled image area */}
