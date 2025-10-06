@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Alert, TouchableWithoutFeedback, Platform, PermissionsAndroid, Image, PanResponder, Animated } from 'react-native';
+// view-shot used to capture the rendered preview for exact-on-screen sampling
+let captureRef: any = null;
+try { captureRef = require('react-native-view-shot').captureRef; } catch (_e) { captureRef = null; }
 import { ICONS } from '../../Images';
 import { styles } from './ColorDetector.styles';
 import { getRandomColor } from './ColorDetectorLogic';
@@ -46,6 +49,89 @@ const getJpegUtils = () => {
   } catch (_e) {
     return { jpegjs: null, BufferShim: null };
   }
+};
+
+// Read EXIF Orientation from a JPEG Buffer (returns 1..8 or 1 if unknown)
+const getJpegOrientation = (buf: any): number => {
+  try {
+    // Ensure we have a Uint8Array view
+    let arr: Uint8Array;
+    if (buf && typeof buf === 'object' && typeof buf.length === 'number' && typeof buf[0] === 'number') {
+      arr = buf;
+    } else if (buf && typeof buf === 'object' && (buf as any).toString && (buf as any).toString() === '[object Uint8Array]') {
+      arr = buf as Uint8Array;
+    } else if (buf && typeof (buf as any).toArray === 'function') {
+      arr = (buf as any).toArray();
+    } else {
+      // try Buffer -> Uint8Array
+      try { arr = new Uint8Array(buf); } catch (_e) { return 1; }
+    }
+    if (arr.length < 4) return 1;
+    // check SOI
+    if (arr[0] !== 0xFF || arr[1] !== 0xD8) return 1;
+    let offset = 2;
+    while (offset < arr.length) {
+      if (arr[offset] !== 0xFF) break;
+      const marker = arr[offset + 1];
+      // APP1 marker
+      if (marker === 0xE1) {
+        const len = (arr[offset + 2] << 8) + arr[offset + 3];
+        // Exif header starts at offset+4
+        const exifStart = offset + 4;
+        // check "Exif\0\0"
+        if (exifStart + 6 <= arr.length) {
+          if (arr[exifStart] === 0x45 && arr[exifStart + 1] === 0x78 && arr[exifStart + 2] === 0x69 && arr[exifStart + 3] === 0x66 && arr[exifStart + 4] === 0x00 && arr[exifStart + 5] === 0x00) {
+            // TIFF header starts at exifStart + 6
+            const tiffOffset = exifStart + 6;
+            const isLittle = arr[tiffOffset] === 0x49 && arr[tiffOffset + 1] === 0x49;
+            const readUint16 = (off: number) => isLittle ? (arr[off] + (arr[off+1]<<8)) : ((arr[off]<<8) + arr[off+1]);
+            const readUint32 = (off: number) => isLittle ? (arr[off] + (arr[off+1]<<8) + (arr[off+2]<<16) + (arr[off+3]<<24)) : ((arr[off]<<24) + (arr[off+1]<<16) + (arr[off+2]<<8) + arr[off+3]);
+            // check magic number 0x002A
+            const magic = readUint16(tiffOffset + 2);
+            if (magic !== 0x002A && magic !== 42) return 1;
+            const ifdOffset = readUint32(tiffOffset + 4);
+            let dirStart = tiffOffset + ifdOffset;
+            if (dirStart + 2 > arr.length) return 1;
+            const entries = readUint16(dirStart);
+            dirStart += 2;
+            for (let i = 0; i < entries; i++) {
+              const entryOffset = dirStart + i * 12;
+              if (entryOffset + 12 > arr.length) break;
+              const tag = readUint16(entryOffset);
+              if (tag === 0x0112) {
+                // orientation tag
+                const type = readUint16(entryOffset + 2);
+                const count = readUint32(entryOffset + 4);
+                let valueOff = entryOffset + 8;
+                let val = 0;
+                if (type === 3 && count === 1) {
+                  // short in-place
+                  val = readUint16(valueOff);
+                } else {
+                  const actualValOffset = tiffOffset + readUint32(valueOff);
+                  if (actualValOffset + 2 <= arr.length) val = readUint16(actualValOffset);
+                }
+                if (val >= 1 && val <= 8) return val;
+                return 1;
+              }
+            }
+          }
+        }
+        // move past this marker
+        offset += 2 + len;
+        continue;
+      } else {
+        // other marker: has length
+        if (offset + 4 > arr.length) break;
+        const len = (arr[offset + 2] << 8) + arr[offset + 3];
+        offset += 2 + len;
+        continue;
+      }
+    }
+  } catch (_e) {
+    // ignore
+  }
+  return 1;
 };
 
 // Crosshair config: tweak these to change length (factor of preview), thickness (px), and dot size
@@ -103,6 +189,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   // scale it to cover the preview and clamp pan bounds when dragging.
   const [imageNaturalSize, setImageNaturalSize] = useState<{w:number,h:number} | null>(null);
   const [imageScaledSize, setImageScaledSize] = useState<{w:number,h:number} | null>(null);
+  // Debug overlay state for uploaded-image mapping (helps visualize mapping during testing)
+  const [uploadDebug, setUploadDebug] = useState<any | null>(null);
   // toast shown when we invoke TTS to help debug silent TTS
     // (Removed transient TTS debug toast)
   // Suppress automatic live speech around capture to avoid audio being cut by camera lifecycle
@@ -296,6 +384,39 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   debugLog('[ColorDetector] processSnapshotAndSample: unexpected', err);
       processingFrameRef.current = false;
       return false;
+    }
+  };
+
+  // Capture the preview view as an image (PNG) and sample the pixel(s) at preview-relative coordinates.
+  // Returns sampled { r,g,b } or null.
+  const sampleFromPreviewSnapshot = async (relX: number, relY: number): Promise<{r:number,g:number,b:number}|null> => {
+    try {
+      if (!captureRef) return null;
+      if (!previewRef.current) return null;
+      const pw = previewLayout.current.width || 0;
+      const ph = previewLayout.current.height || 0;
+      if (!pw || !ph) return null;
+      // Capture to a temporary file path (tmpfile) so we can leverage the native decoder which handles orientation and PNG/JPEG reliably
+      const tmp = await captureRef(previewRef.current, { format: 'png', quality: 0.9, result: 'tmpfile', width: Math.round(pw), height: Math.round(ph) });
+      if (!tmp) return null;
+      // normalize absolute paths to file:// if needed
+      const normalized = (typeof tmp === 'string' && tmp.startsWith('/')) ? ('file://' + tmp) : tmp;
+      try {
+        const { decodeScaledRegion } = require('../../services/ImageDecoder');
+        if (typeof decodeScaledRegion === 'function') {
+          // decodeScaledRegion expects preview-relative coords
+          const nativeSample = await decodeScaledRegion(normalized, relX, relY, pw, ph);
+          if (nativeSample && typeof nativeSample.r === 'number') {
+            return { r: nativeSample.r, g: nativeSample.g, b: nativeSample.b };
+          }
+        }
+      } catch (err) {
+        debugLog('[ColorDetector] sampleFromPreviewSnapshot: native decode of snapshot failed', err);
+      }
+      return null;
+    } catch (err) {
+      debugLog('[ColorDetector] sampleFromPreviewSnapshot: unexpected', err);
+      return null;
     }
   };
 
@@ -1411,6 +1532,28 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   const sampleUploadedImageAt = async (relX: number, relY: number): Promise<any> => {
     if (!selectedImageUri) return null;
     try {
+      // Prefer sampling from a snapshot of the rendered preview (exactly what user sees).
+      try {
+        if (captureRef && previewRef.current) {
+          debugLog('[ColorDetector] sampleUploadedImageAt: attempting snapshot-based sampling at', { relX, relY });
+          const snapSample = await sampleFromPreviewSnapshot(relX, relY);
+          debugLog('[ColorDetector] sampleUploadedImageAt: snapshot sample ->', snapSample);
+          if (snapSample) {
+            const match = await findClosestColorAsync([snapSample.r, snapSample.g, snapSample.b], 3).catch(() => null);
+            if (match) {
+              const pw = previewLayout.current.width || 0;
+              const ph = previewLayout.current.height || 0;
+              const mappedPreviewX = relX;
+              const mappedPreviewY = relY;
+              setUploadDebug({ imageLeft: 0, imageTop: 0, scaledW: pw, scaledH: ph, ix: null, iy: null, mappedPreviewX, mappedPreviewY, sampled: snapSample, via: 'snapshot' });
+              return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+            }
+          }
+        }
+      } catch (_e) {
+        debugLog('[ColorDetector] sampleUploadedImageAt: snapshot sampling failed', _e);
+        // fall through to existing logic
+      }
       // Resolve base64 from various URI shapes: data:, file://, http(s)://, content://
       let base64: string | null = null;
       const uri = selectedImageUri as string;
@@ -1428,6 +1571,20 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           if (nativeSample) {
             const match = await findClosestColorAsync([nativeSample.r, nativeSample.g, nativeSample.b], 3).catch(() => null);
             if (!match) return null;
+            try {
+              // set upload debug info so overlay shows where we sampled (native decoder uses preview-relative coords)
+              const pw = previewLayout.current.width || 0;
+              const ph = previewLayout.current.height || 0;
+              const scaled = imageScaledSize || { w: pw, h: ph };
+              let panX = 0, panY = 0;
+              try { panX = (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0; } catch (_e) { panX = 0; }
+              try { panY = (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0; } catch (_e) { panY = 0; }
+              const imageLeft = Math.round((pw - scaled.w) / 2) + panX;
+              const imageTop = Math.round((ph - scaled.h) / 2) + panY;
+              const mappedPreviewX = relX;
+              const mappedPreviewY = relY;
+              setUploadDebug({ imageLeft, imageTop, scaledW: scaled.w, scaledH: scaled.h, ix: null, iy: null, mappedPreviewX, mappedPreviewY, sampled: nativeSample });
+            } catch (_e) { /* ignore debug set errors */ }
             return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
           }
           // if native decoder failed fall through to JS fallback
@@ -1460,8 +1617,11 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       let decoded: any = null;
       const { jpegjs: _jpegjs, BufferShim: _BufferShim } = getJpegUtils();
       if (!_jpegjs || !_BufferShim) return null;
-      const buffer = _BufferShim.from(base64, 'base64');
-      const dec = _jpegjs.decode(buffer, { useTArray: true });
+  const buffer = _BufferShim.from(base64, 'base64');
+  // detect EXIF orientation before decoding so we can map coords correctly
+  let exifOrient = 1;
+  try { exifOrient = getJpegOrientation(buffer); } catch (_e) { exifOrient = 1; }
+  const dec = _jpegjs.decode(buffer, { useTArray: true });
       if (!dec || !dec.width || !dec.data) return null;
       decoded = dec;
       const w = decoded.width; const h = decoded.height; const data = decoded.data;
@@ -1512,14 +1672,46 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       const localX = relX - imageLeft;
       const localY = relY - imageTop;
 
+      debugLog('[ColorDetector] sampleUploadedImageAt: mapping debug', {
+        uri, imageNaturalSize, scaled, previewLayout: { pw, ph }, pan: { panX, panY }, imageLeft, imageTop, localX, localY
+      });
+
       // If the tap falls outside the visible image area, signal the caller to ignore the tap
       if (localX < 0 || localY < 0 || localX > scaled.w || localY > scaled.h) {
         debugLog('[ColorDetector] sampleUploadedImageAt: tap off visible image', { localX, localY, imageLeft, imageTop, scaled });
         return { offImage: true } as any;
       }
 
-      const ix = Math.max(0, Math.min(w - 1, Math.round((localX / scaled.w) * w)));
-      const iy = Math.max(0, Math.min(h - 1, Math.round((localY / scaled.h) * h)));
+      // map local preview coords (localX/localY) -> image pixel coords (ix,iy)
+      let ix = Math.max(0, Math.min(w - 1, Math.round((localX / scaled.w) * w)));
+      let iy = Math.max(0, Math.min(h - 1, Math.round((localY / scaled.h) * h)));
+      // adjust for EXIF orientation so ix/iy correspond to the rendered orientation
+      try {
+        switch (exifOrient) {
+          case 2: // flipped horizontally
+            ix = w - 1 - ix; break;
+          case 3: // rotated 180
+            ix = w - 1 - ix; iy = h - 1 - iy; break;
+          case 4: // flipped vertically
+            iy = h - 1 - iy; break;
+          case 5: {
+            // transpose
+            const ox = ix; ix = iy; iy = ox; break;
+          }
+          case 6: { // rotate 90 CW
+            const ox = ix; ix = h - 1 - iy; iy = ox; break;
+          }
+          case 7: { // transverse
+            const ox = ix; ix = h - 1 - iy; iy = w - 1 - ox; break;
+          }
+          case 8: { // rotate 270 CW
+            const ox = ix; ix = iy; iy = w - 1 - ox; break;
+          }
+          default: break;
+        }
+      } catch (_e) { /* ignore orientation mapping errors */ }
+
+  debugLog('[ColorDetector] sampleUploadedImageAt: mapped image coords', { ix, iy, imagePixelSize: { w, h } });
 
       const half = 4;
       let rSum = 0, gSum = 0, bSum = 0, count = 0;
@@ -1531,6 +1723,12 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       }
       if (count === 0) return null;
   const sampled = { r: Math.round(rSum/count), g: Math.round(gSum/count), b: Math.round(bSum/count) };
+  debugLog('[ColorDetector] sampleUploadedImageAt: sampled RGB ->', sampled);
+  try {
+    const mappedPreviewX = imageLeft + (ix / w) * scaled.w;
+    const mappedPreviewY = imageTop + (iy / h) * scaled.h;
+    setUploadDebug({ imageLeft, imageTop, scaledW: scaled.w, scaledH: scaled.h, ix, iy, mappedPreviewX, mappedPreviewY, sampled });
+  } catch (_e) { /* ignore debug errors */ }
   const match = await findClosestColorAsync([sampled.r, sampled.g, sampled.b], 3).catch(() => null);
   if (!match) return null;
   return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -1714,6 +1912,20 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                   }}
                 >
                   <Image source={{ uri: selectedImageUri }} style={{ width: Math.round(imageScaledSize.w), height: Math.round(imageScaledSize.h), resizeMode: 'cover' }} />
+                  {uploadDebug && (() => {
+                    const viewLeft = Math.round((previewSize.width - imageScaledSize.w) / 2);
+                    const viewTop = Math.round((previewSize.height - imageScaledSize.h) / 2);
+                    const dotLeft = Math.round(uploadDebug.mappedPreviewX - viewLeft - (uploadDebug.mappedPreviewX ? 0 : 0));
+                    const dotTop = Math.round(uploadDebug.mappedPreviewY - viewTop - (uploadDebug.mappedPreviewY ? 0 : 0));
+                    return (
+                      <View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, width: imageScaledSize.w, height: imageScaledSize.h }}>
+                        {/* border showing the scaled image area */}
+                        <View style={{ position: 'absolute', left: 0, top: 0, width: imageScaledSize.w, height: imageScaledSize.h, borderWidth: 2, borderColor: 'rgba(255,0,0,0.6)' }} />
+                        {/* dot at mappedPreviewX/mappedPreviewY relative to the Animated.View origin */}
+                        <View style={{ position: 'absolute', left: dotLeft, top: dotTop, width: 12, height: 12, borderRadius: 6, backgroundColor: 'rgba(0,255,0,0.9)', borderWidth: 2, borderColor: 'white' }} />
+                      </View>
+                    );
+                  })()}
                 </Animated.View>
               ) : (
                 <Animated.View
