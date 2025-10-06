@@ -5,7 +5,7 @@ import { styles } from './ColorDetector.styles';
 import { getRandomColor } from './ColorDetectorLogic';
 import { findClosestColor } from '../../services/ColorMatcher';
 import { findClosestColorAsync } from '../../services/ColorMatcherWorker';
-import { speak } from '../../utils/tts';
+import { speak, initTts, stop as stopTts } from '../../utils/tts';
 
 // Optional camera modules (lazy-require)
 let RNCamera: any = null;
@@ -104,10 +104,11 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   const [imageNaturalSize, setImageNaturalSize] = useState<{w:number,h:number} | null>(null);
   const [imageScaledSize, setImageScaledSize] = useState<{w:number,h:number} | null>(null);
   // toast shown when we invoke TTS to help debug silent TTS
-  const [ttsToast, setTtsToast] = useState<string | null>(null);
-  const ttsToastTimer = useRef<any>(null);
+    // (Removed transient TTS debug toast)
   // Suppress automatic live speech around capture to avoid audio being cut by camera lifecycle
   const suppressSpeechRef = useRef<boolean>(false);
+  // Track pending freeze-speak timers so we can cancel them when user taps
+  const freezeSpeakTimersRef = useRef<number[]>([]);
   // throttle live speech so we don't spam the user when live detection updates rapidly
   const lastSpokenRef = useRef<number>(0);
   const LIVE_SPEAK_COOLDOWN = 1200; // ms
@@ -131,13 +132,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     try { if (suppressSpeechRef.current && !(opts && opts.force)) { debugLog('[ColorDetector] safeSpeak suppressed ->', text); return false; } } catch (_e) {}
     try { debugLog('[ColorDetector] safeSpeak invoked ->', text); } catch (_e) {}
     try {
-      // show short toast with requested text
-      try {
-        if (ttsToastTimer.current) clearTimeout(ttsToastTimer.current);
-      } catch (_e) {}
-      try { debugLog('[ColorDetector] safeSpeak setting toast ->', text); } catch (_e) {}
-      setTtsToast(text);
-      ttsToastTimer.current = setTimeout(() => { try { setTtsToast(null); } catch (_e) {} }, 1300);
+      // no on-screen toast in release; just speak
+      try { debugLog('[ColorDetector] safeSpeak would speak ->', text); } catch (_e) {}
     } catch (_e) {}
     try {
   const res = speak(text);
@@ -152,8 +148,13 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   // cleanup toast timer on unmount
   useEffect(() => {
     return () => {
-      try { if (ttsToastTimer.current) clearTimeout(ttsToastTimer.current); } catch (_e) {}
+      // nothing to cleanup for tts toast
     };
+  }, []);
+
+  // Ensure the TTS module is primed early so freeze-time speaks don't miss initialization
+  useEffect(() => {
+    try { initTts(); debugLog('[ColorDetector] initTts called'); } catch (_e) {}
   }, []);
   // It takes a lightweight snapshot (if available) and samples the center 3x3 block.
   const processSnapshotAndSample = async (): Promise<boolean> => {
@@ -501,10 +502,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     freezeRef.current = next;
     // when starting a freeze, suppress automatic live speech while we capture
     if (next) suppressSpeechRef.current = true;
-    // immediate toast to indicate freeze/unfreeze action
-    try { if (ttsToastTimer.current) clearTimeout(ttsToastTimer.current); } catch (_e) {}
-    try { setTtsToast(next ? 'Freezing frame...' : 'Resuming live'); } catch (_e) {}
-    ttsToastTimer.current = setTimeout(() => { try { setTtsToast(null); } catch (_e) {} }, 900);
+  // no on-screen freeze/unfreeze toast
   debugLog('toggleFreeze ->', next);
     if (!next) {
       // unfreezing -> reset crosshair to center
@@ -559,27 +557,22 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                   const textToSpeak = voiceMode === 'real' ? liveDetected.realName : liveDetected.family;
                   try {
                     // show toast immediately for freeze so user sees TTS invocation even if TTS is delayed
-                    try { if (ttsToastTimer.current) clearTimeout(ttsToastTimer.current); } catch (_e) {}
-                    try { debugLog('[ColorDetector] toggleFreeze setting toast ->', textToSpeak); } catch (_e) {}
-                    setTtsToast(textToSpeak);
-                    ttsToastTimer.current = setTimeout(() => { try { setTtsToast(null); } catch (_e) {} }, 1300);
+                    // no on-screen toast; attempt to speak immediately
                     // Attempt forced speak twice (short retry) to improve chance audio plays
-                    setTimeout(() => {
-                      try {
-                        const maybe = safeSpeak(textToSpeak, { force: true });
-                        Promise.resolve(maybe).then((ok) => {
-                          if (!ok) Alert.alert('Color', textToSpeak);
-                        }).catch(() => { Alert.alert('Color', textToSpeak); });
-                      } catch (_e) { try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
-                    }, 400);
-                    setTimeout(() => {
-                      try {
-                        const maybe2 = safeSpeak(textToSpeak, { force: true });
-                        Promise.resolve(maybe2).then((ok) => {
-                          if (!ok) Alert.alert('Color', textToSpeak);
-                        }).catch(() => { Alert.alert('Color', textToSpeak); });
-                      } catch (_e) { try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
-                    }, 900);
+                    const speakWithLogging = (delayMs: number) => {
+                      const tid = setTimeout(() => {
+                        try {
+                          const maybe = safeSpeak(textToSpeak, { force: true });
+                          Promise.resolve(maybe).then((ok) => {
+                            debugLog('[ColorDetector] freeze speak attempt result ->', ok, textToSpeak);
+                            if (!ok) Alert.alert('Color', textToSpeak);
+                          }).catch((err) => { debugLog('[ColorDetector] freeze speak promise rejected', err); Alert.alert('Color', textToSpeak); });
+                        } catch (err) { debugLog('[ColorDetector] freeze speak threw', err); try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
+                      }, delayMs) as unknown as number;
+                      try { freezeSpeakTimersRef.current.push(tid); } catch (_e) {}
+                    };
+                    speakWithLogging(400);
+                    speakWithLogging(900);
                     // clear suppression after retries
                     setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 1000);
                   } catch (_e) {
@@ -595,26 +588,21 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                         const textToSpeak = voiceMode === 'real' ? c.realName : c.family;
                         try {
                           // show toast immediately for freeze fallback
-                          try { if (ttsToastTimer.current) clearTimeout(ttsToastTimer.current); } catch (_e) {}
-                          try { debugLog('[ColorDetector] toggleFreeze (fallback) setting toast ->', textToSpeak); } catch (_e) {}
-                          setTtsToast(textToSpeak);
-                          ttsToastTimer.current = setTimeout(() => { try { setTtsToast(null); } catch (_e) {} }, 1300);
-                          setTimeout(() => {
-                            try {
-                              const maybe = safeSpeak(textToSpeak, { force: true });
-                              Promise.resolve(maybe).then((ok) => {
-                                if (!ok) Alert.alert('Color', textToSpeak);
-                              }).catch(() => { Alert.alert('Color', textToSpeak); });
-                            } catch (_e) { try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
-                          }, 400);
-                          setTimeout(() => {
-                            try {
-                              const maybe2 = safeSpeak(textToSpeak, { force: true });
-                              Promise.resolve(maybe2).then((ok) => {
-                                if (!ok) Alert.alert('Color', textToSpeak);
-                              }).catch(() => { Alert.alert('Color', textToSpeak); });
-                            } catch (_e) { try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
-                          }, 900);
+                          // no on-screen toast for fallback; attempt to speak
+                          const speakWithLogging2 = (delayMs: number) => {
+                            const tid2 = setTimeout(() => {
+                              try {
+                                const maybe2 = safeSpeak(textToSpeak, { force: true });
+                                Promise.resolve(maybe2).then((ok) => {
+                                  debugLog('[ColorDetector] freeze fallback speak result ->', ok, textToSpeak);
+                                  if (!ok) Alert.alert('Color', textToSpeak);
+                                }).catch((err) => { debugLog('[ColorDetector] freeze fallback speak promise rejected', err); Alert.alert('Color', textToSpeak); });
+                              } catch (err) { debugLog('[ColorDetector] freeze fallback speak threw', err); try { Alert.alert('Color', textToSpeak); } catch (_e2) {} }
+                            }, delayMs) as unknown as number;
+                            try { freezeSpeakTimersRef.current.push(tid2); } catch (_e) {}
+                          };
+                          speakWithLogging2(400);
+                          speakWithLogging2(900);
                           setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 1000);
                         } catch (_e) {
                           try { Alert.alert('Color', textToSpeak); } catch (_e2) {}
@@ -650,8 +638,32 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           const relX = Math.max(0, Math.min(pw, pageX - px));
           const relY = Math.max(0, Math.min(ph, pageY - py));
           debugLog('onScreenPress relative:', { relX, relY });
-          setCrosshairPos({ x: relX, y: relY });
           // when frozen, tapping selects a new sampled color at that point
+          // If an uploaded image is present, quickly determine if the tap is within the visible
+          // image rect (cover-scaled + pan). If so, move the crosshair immediately; if not,
+          // ignore the tap (user requested) without waiting for async sampling.
+          try {
+            if (selectedImageUri && imageScaledSize && previewLayout.current) {
+              let panX = 0, panY = 0;
+              try { panX = (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0; } catch (_e) { panX = 0; }
+              try { panY = (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0; } catch (_e) { panY = 0; }
+              const imageLeft = Math.round((pw - imageScaledSize.w) / 2) + panX;
+              const imageTop = Math.round((ph - imageScaledSize.h) / 2) + panY;
+              // If tap is outside visible image, ignore
+              if (relX < imageLeft || relY < imageTop || relX > imageLeft + imageScaledSize.w || relY > imageTop + imageScaledSize.h) {
+                debugLog('[ColorDetector] onScreenPress: tap outside uploaded image bounds, ignoring', { relX, relY, imageLeft, imageTop, scaled: imageScaledSize });
+                return;
+              }
+              // move crosshair immediately for snappy feedback
+              try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
+            } else {
+              // no uploaded image, move crosshair immediately
+              try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
+            }
+          } catch (_e) {
+            // fall back to previous behavior if any synchronous check fails
+            try { setCrosshairPos({ x: relX, y: relY }); } catch (_e2) {}
+          }
           let selectedSample: any = null;
           // If the user uploaded an image, sample from that image instead of trying to capture from camera
           const trySampleUploadedImage = async () => {
@@ -668,7 +680,15 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
 
           // Try uploaded-image sampling first (if any), otherwise fall back to camera capture
           trySampleUploadedImage().then(async (uploadedRes:any) => {
+            debugLog('[ColorDetector] onScreenPress: uploadedRes ->', uploadedRes);
+            // If uploadedRes explicitly indicates the tap was off the visible image, ignore the tap.
+            if (uploadedRes && (uploadedRes as any).offImage) {
+              debugLog('[ColorDetector] onScreenPress: tap was outside visible uploaded image, ignoring');
+              return;
+            }
+
             if (uploadedRes) {
+              debugLog('[ColorDetector] onScreenPress: using uploaded image sample ->', uploadedRes);
               selectedSample = uploadedRes;
               setDetected(selectedSample);
               setFrozenSnapshot(selectedSample);
@@ -677,16 +697,18 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
               if (frozenImageUriRef.current) {
                 try {
                   const uri = frozenImageUriRef.current;
+                  debugLog('[ColorDetector] onScreenPress: attempting native decode of frozenImageUri ->', uri, 'rel', { relX, relY });
                   try {
                     const { decodeScaledRegion } = require('../../services/ImageDecoder');
                     const nativeSample = await decodeScaledRegion(uri, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
+                    debugLog('[ColorDetector] onScreenPress: nativeSample ->', nativeSample);
                     if (nativeSample) {
                       const match = await findClosestColorAsync([nativeSample.r, nativeSample.g, nativeSample.b], 3).catch(() => null);
                       if (match) {
                         selectedSample = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+                        debugLog('[ColorDetector] onScreenPress: native decode matched ->', selectedSample);
                         setDetected(selectedSample);
                         setFrozenSnapshot(selectedSample);
-                        return;
                       }
                     }
                   } catch (_e) {
@@ -694,14 +716,16 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                     try {
                       const RNFS = require('react-native-fs');
                       const base64 = await RNFS.readFile(uri.replace('file://',''), 'base64');
+                      debugLog('[ColorDetector] onScreenPress: RNFS readFile returned base64 length=', base64?.length ?? 0);
                       const sample = decodeJpegAndSampleAt(base64, relX, relY);
+                      debugLog('[ColorDetector] onScreenPress: decodeJpegAndSampleAt ->', sample);
                       if (sample) {
                         const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
                         if (match) {
                           selectedSample = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+                          debugLog('[ColorDetector] onScreenPress: RNFS decode matched ->', selectedSample);
                           setDetected(selectedSample);
                           setFrozenSnapshot(selectedSample);
-                          return;
                         }
                       }
                     } catch (_e2) { debugLog('[ColorDetector] onScreenPress: RNFS read of frozen image failed', _e2); }
@@ -711,15 +735,39 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                 }
               }
 
-              // Try to capture image and sample at the tapped preview coordinates
-              try {
-                const res:any = await captureAndSampleAt(relX, relY);
-                if (res) {
-                  selectedSample = res;
-                  setDetected(res);
-                  setFrozenSnapshot(res);
-                } else {
-                  // fallback to random match (existing behavior)
+              // If we already have a selectedSample from the frozenImage decode, skip capture fallback
+              if (selectedSample) {
+                debugLog('[ColorDetector] onScreenPress: sample already obtained from frozen image, skipping capture fallback', selectedSample);
+              } else {
+                // Try to capture image and sample at the tapped preview coordinates
+                try {
+                  const res:any = await captureAndSampleAt(relX, relY);
+                  debugLog('[ColorDetector] onScreenPress: captureAndSampleAt ->', res);
+                  if (res) {
+                    selectedSample = res;
+                    setDetected(res);
+                    setFrozenSnapshot(res);
+                  } else {
+                    debugLog('[ColorDetector] onScreenPress: captureAndSampleAt returned null, falling back to random');
+                    // fallback to random match (existing behavior)
+                    try {
+                      const sampled = getRandomColor();
+                      const rgb = hexToRgb(sampled.hex);
+                      const match = findClosestColor(rgb, 3);
+                      const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+                      setDetected(c);
+                      setFrozenSnapshot(c);
+                      selectedSample = c;
+                    } catch (err) {
+                      const c = getRandomColor();
+                      setDetected(c);
+                      setFrozenSnapshot(c);
+                      selectedSample = c;
+                    }
+                  }
+                } catch (_err) {
+                  debugLog('[ColorDetector] onScreenPress: captureAndSampleAt threw', _err);
+                  // on capture failure, fallback to previous behavior
                   try {
                     const sampled = getRandomColor();
                     const rgb = hexToRgb(sampled.hex);
@@ -735,30 +783,29 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                     selectedSample = c;
                   }
                 }
-              } catch (_err) {
-                // on capture failure, fallback to previous behavior
-                try {
-                  const sampled = getRandomColor();
-                  const rgb = hexToRgb(sampled.hex);
-                  const match = findClosestColor(rgb, 3);
-                  const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
-                  setDetected(c);
-                  setFrozenSnapshot(c);
-                  selectedSample = c;
-                } catch (err) {
-                  const c = getRandomColor();
-                  setDetected(c);
-                  setFrozenSnapshot(c);
-                  selectedSample = c;
-                }
               }
+            }
+
+            // If we found a sample, move crosshair to the tapped point.
+            if (selectedSample) {
+              debugLog('[ColorDetector] onScreenPress: selectedSample ->', selectedSample);
+              try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
             }
 
             // speak immediately for taps while frozen (bypass live cooldown)
             if (voiceEnabled && voiceMode !== 'disable' && selectedSample) {
               try {
                 const textToSpeak = voiceMode === 'real' ? selectedSample.realName : selectedSample.family;
+                debugLog('[ColorDetector] onScreenPress: about to safeSpeak ->', textToSpeak);
+                // Cancel any pending freeze-speak timers so their queued audio doesn't override this tap
+                try {
+                  freezeSpeakTimersRef.current.forEach((tid) => { try { clearTimeout(tid as any); } catch (_e) {} });
+                } catch (_e) {}
+                freezeSpeakTimersRef.current = [];
+                // stop any currently playing/scheduled TTS audio before speaking the tapped sample
+                try { stopTts(); } catch (_e) {}
                 const ok = safeSpeak(textToSpeak);
+                debugLog('[ColorDetector] onScreenPress: safeSpeak result ->', ok, textToSpeak);
                 lastSpokenRef.current = Date.now();
                 if (!ok) Alert.alert('Color', textToSpeak);
               } catch (err) { /* ignore */ }
@@ -766,6 +813,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           }).catch((_err:any) => {
             // ensure we always speak/fallback even if promise rejects
             try {
+              debugLog('[ColorDetector] onScreenPress: promise chain rejected, falling back ->', _err);
               const sampled = getRandomColor();
               setDetected(sampled);
               setFrozenSnapshot(sampled);
@@ -822,7 +870,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       }
 
       // Use the callback API since different versions expose different shapes
-      ImagePicker.launchImageLibrary({ mediaType: 'photo' }, (response: any) => {
+  ImagePicker.launchImageLibrary({ mediaType: 'photo' }, async (response: any) => {
         try {
           if (!response) return;
           if (response.didCancel) return;
@@ -842,17 +890,53 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           setSelectedImageUri(uri);
           // clear any stored frozen image when a new uploaded image is chosen
           frozenImageUriRef.current = null;
-          // For now, simulate sampling by picking a random color then matching it to dataset
+          // Sample the uploaded image at the center of the preview to provide an initial detected color
           let selectedSample: any = null;
           try {
-            const sampled = getRandomColor();
-            const rgb = hexToRgb(sampled.hex);
-            const match = findClosestColor(rgb, 3);
-            const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
-            setDetected(c);
-            setFrozenSnapshot(c);
-            setFreeze(true);
-            selectedSample = c;
+            // Ensure preview is measured so sampleUploadedImageAt has correct mapping
+            try { await ensurePreviewMeasured(); } catch (_e) { /* ignore */ }
+            const centerX = (previewLayout.current.width || 0) / 2;
+            const centerY = (previewLayout.current.height || 0) / 2;
+            let res: any = null;
+            try { res = await sampleUploadedImageAt(centerX, centerY); } catch (_e) { res = null; }
+            if (res && !(res as any).offImage) {
+              selectedSample = res;
+              setDetected(res);
+              setFrozenSnapshot(res);
+              setFreeze(true);
+            } else {
+              // Try a JS decode-center fallback using RNFS if file:// URI available
+              try {
+                if (selectedImageUri && (selectedImageUri as string).startsWith('file://')) {
+                  const RNFS = require('react-native-fs');
+                  const base64 = await RNFS.readFile((selectedImageUri as string).replace('file://',''), 'base64');
+                  if (base64) {
+                    const centerSample = decodeJpegAndSampleCenter(base64);
+                    if (centerSample) {
+                      const match = await findClosestColorAsync([centerSample.r, centerSample.g, centerSample.b], 3).catch(() => null);
+                      if (match) {
+                        const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+                        selectedSample = c;
+                        setDetected(c);
+                        setFrozenSnapshot(c);
+                        setFreeze(true);
+                      }
+                    }
+                  }
+                }
+              } catch (_e) {
+                // ignore RNFS fallback errors
+              }
+
+              // If still no sample, fallback to random to avoid blank UI
+              if (!selectedSample) {
+                const sampled = getRandomColor();
+                setDetected(sampled);
+                setFrozenSnapshot(sampled);
+                setFreeze(true);
+                selectedSample = sampled;
+              }
+            }
           } catch (err) {
             const sampled = getRandomColor();
             setDetected(sampled);
@@ -860,7 +944,6 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
             setFreeze(true);
             selectedSample = sampled;
           }
-          setFreeze(true);
           // speak sample immediately if allowed
           if (voiceEnabled && voiceMode !== 'disable' && selectedSample) {
             try {
@@ -1429,13 +1512,10 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       const localX = relX - imageLeft;
       const localY = relY - imageTop;
 
+      // If the tap falls outside the visible image area, signal the caller to ignore the tap
       if (localX < 0 || localY < 0 || localX > scaled.w || localY > scaled.h) {
-        // tapped outside the visible image area; fallback to center
-        const centerSample = decodeJpegAndSampleCenter(base64);
-        if (!centerSample) return null;
-        const match = await findClosestColorAsync([centerSample.r, centerSample.g, centerSample.b], 3).catch(() => null);
-        if (!match) return null;
-        return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+        debugLog('[ColorDetector] sampleUploadedImageAt: tap off visible image', { localX, localY, imageLeft, imageTop, scaled });
+        return { offImage: true } as any;
       }
 
       const ix = Math.max(0, Math.min(w - 1, Math.round((localX / scaled.w) * w)));
@@ -1595,19 +1675,11 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           <Image source={ICONS.ARROWicon} style={styles.backIconImage} />
         </TouchableOpacity>
   <TouchableOpacity onPress={() => { openSettings(); }} style={styles.settingsButton}><Text style={styles.settingsText}>⚙️</Text></TouchableOpacity>
-        {/* debug capture button (hidden in production) */}
-        <TouchableOpacity onPress={() => { debugCapture(); }} style={[styles.settingsButton, { marginLeft: 8 }]}>
-          <Text style={[styles.settingsText, { fontSize: 16 }]}>🐞</Text>
-        </TouchableOpacity>
+        {/* spacer for header actions */}
         {/* spacer for header actions */}
       </View>
 
-      {/* TTS toast: small transient overlay shown when safeSpeak is invoked */}
-      {ttsToast ? (
-        <View pointerEvents="none" style={[styles.ttsToastContainer]}>
-          <Text style={styles.ttsToastText}>{ttsToast}</Text>
-        </View>
-      ) : null}
+      {/* (TTS debug toast removed) */}
 
       {/* Camera area (placeholder image) */}
       <TouchableWithoutFeedback onPress={onPreviewTap}>
@@ -1827,7 +1899,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         <View style={styles.infoArea}>
           {/* Inline swatch placed under the preview (no text inside) */}
           <View style={styles.inlineSwatchRow}>
-            <View style={[styles.swatchBoxLarge, { backgroundColor: displayDetected?.hex || '#000' }]} />
+            <View style={[styles.swatchBoxLarge, { backgroundColor: displayDetected?.hex || '#000', opacity: adjusting ? 0 : 1 }]} />
           </View>
           {showFamily && (
             <View style={styles.infoRow}>

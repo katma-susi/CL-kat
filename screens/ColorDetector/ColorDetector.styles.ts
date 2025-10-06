@@ -69,7 +69,5 @@ export const styles = StyleSheet.create({
   // Inline swatch (placed below preview in info area)
   inlineSwatchRow: { width: '100%', alignItems: 'flex-start', marginBottom: rf(12) },
   swatchBoxLarge: { width: rf(104), height: rf(104), borderRadius: rf(12), borderWidth: 1, borderColor: '#DDD', backgroundColor: '#999' },
-  // TTS toast: small translucent bar near the top center
-  ttsToastContainer: { position: 'absolute', left: 20, right: 20, top: rf(10), alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingVertical: rf(8), paddingHorizontal: rf(12), borderRadius: rf(8), zIndex: 99999, elevation: 30 },
-  ttsToastText: { color: '#fff', fontSize: rf(14), fontWeight: '600' },
+  // (TTS debug toast removed)
 });
