@@ -1912,24 +1912,6 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                   }}
                 >
                   <Image source={{ uri: selectedImageUri }} style={{ width: Math.round(imageScaledSize.w), height: Math.round(imageScaledSize.h), resizeMode: 'cover' }} />
-                  {uploadDebug && (() => {
-                    const viewLeft = Math.round((previewSize.width - imageScaledSize.w) / 2);
-                    const viewTop = Math.round((previewSize.height - imageScaledSize.h) / 2);
-                    // account for current pan transform so the overlay dot aligns with the visible image
-                    let panX = 0, panY = 0;
-                    try { panX = (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0; } catch (_e) { panX = 0; }
-                    try { panY = (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0; } catch (_e) { panY = 0; }
-                    const dotLeft = Math.round(uploadDebug.mappedPreviewX - viewLeft - panX);
-                    const dotTop = Math.round(uploadDebug.mappedPreviewY - viewTop - panY);
-                    return (
-                      <View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, width: imageScaledSize.w, height: imageScaledSize.h }}>
-                        {/* border showing the scaled image area */}
-                        <View style={{ position: 'absolute', left: 0, top: 0, width: imageScaledSize.w, height: imageScaledSize.h, borderWidth: 2, borderColor: 'rgba(255,0,0,0.6)' }} />
-                        {/* dot at mappedPreviewX/mappedPreviewY relative to the Animated.View origin */}
-                        <View style={{ position: 'absolute', left: dotLeft, top: dotTop, width: 12, height: 12, borderRadius: 6, backgroundColor: 'rgba(0,255,0,0.9)', borderWidth: 2, borderColor: 'white' }} />
-                      </View>
-                    );
-                  })()}
                 </Animated.View>
               ) : (
                 <Animated.View
@@ -2075,7 +2057,14 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                     { width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, left: crosshairPos.x - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), top: crosshairPos.y - Math.round(CROSSHAIR_CONTAINER_SIZE / 2) },
                   ]}
                 >
-                  <View style={[styles.crosshairDot, { width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE / 2), borderWidth: CROSSHAIR_DOT_BORDER }]} />
+                  <View style={{ width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, alignItems: 'center', justifyContent: 'center' }}>
+                    {/* red circular marker */}
+                    <View style={{ width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE/2), backgroundColor: 'rgba(255,0,0,0.95)' }} />
+                    {/* vertical white crosshair line (2px) */}
+                    <View style={{ position: 'absolute', width: 2, height: CROSSHAIR_CONTAINER_SIZE * 2, backgroundColor: 'white' }} />
+                    {/* horizontal white crosshair line (2px) */}
+                    <View style={{ position: 'absolute', height: 2, width: CROSSHAIR_CONTAINER_SIZE * 2, backgroundColor: 'white' }} />
+                  </View>
                 </View>
               ) : (
                 previewSize && (
@@ -2086,7 +2075,11 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                       { width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, left: Math.round(previewSize.width / 2) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), top: Math.round(previewSize.height / 2) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2) },
                     ]}
                   >
-                    <View style={[styles.crosshairDot, { width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE / 2), borderWidth: CROSSHAIR_DOT_BORDER }]} />
+                    <View style={{ width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, alignItems: 'center', justifyContent: 'center' }}>
+                      <View style={{ width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE/2), backgroundColor: 'rgba(255,0,0,0.95)' }} />
+                      <View style={{ position: 'absolute', width: 2, height: CROSSHAIR_CONTAINER_SIZE * 2, backgroundColor: 'white' }} />
+                      <View style={{ position: 'absolute', height: 2, width: CROSSHAIR_CONTAINER_SIZE * 2, backgroundColor: 'white' }} />
+                    </View>
                   </View>
                 )
               )}
