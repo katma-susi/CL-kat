@@ -874,24 +874,17 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                  <Animated.View
                    {...(adjusting && panResponder.current ? panResponder.current.panHandlers : {})}
                    pointerEvents={adjusting ? 'auto' : 'none'}
-                   style={{
-                     position: 'absolute',
-                     left: Math.round((previewSize.width - imageScaledSize.w) / 2),
-                     top: Math.round((previewSize.height - imageScaledSize.h) / 2),
-                     width: Math.round(imageScaledSize.w),
-                     height: Math.round(imageScaledSize.h),
-                     transform: [{ translateX: pan.x }, { translateY: pan.y }],
-                   }}
+                   style={[styles.animatedImageAbsolute, { left: Math.round((previewSize.width - imageScaledSize.w) / 2), top: Math.round((previewSize.height - imageScaledSize.h) / 2), width: Math.round(imageScaledSize.w), height: Math.round(imageScaledSize.h), transform: [{ translateX: pan.x }, { translateY: pan.y }] }]}
                  >
-                   <Image source={{ uri: selectedImageUri }} style={{ width: Math.round(imageScaledSize.w), height: Math.round(imageScaledSize.h), resizeMode: 'cover' }} />
+                   <Image source={{ uri: selectedImageUri }} style={[{ width: Math.round(imageScaledSize.w), height: Math.round(imageScaledSize.h) }, styles.selectedImage]} />
                  </Animated.View>
                ) : (
                  <Animated.View
                    {...(adjusting && panResponder.current ? panResponder.current.panHandlers : {})}
                    pointerEvents={adjusting ? 'auto' : 'none'}
-                   style={[ { transform: [{ translateX: pan.x }, { translateY: pan.y }] , width: '100%', height: '100%' }]}
+                   style={[styles.animatedFull, { transform: [{ translateX: pan.x }, { translateY: pan.y }] }]}
                  >
-                   <Image source={{ uri: selectedImageUri }} style={[styles.cameraInner, { resizeMode: 'cover' }]} />
+                   <Image source={{ uri: selectedImageUri }} style={[styles.cameraInner, styles.selectedImage]} />
                  </Animated.View>
                )}
 
@@ -974,31 +967,21 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
 
     
    
-    <View pointerEvents="none" style={[styles.absoluteOverlay, { width: previewSize?.width ?? '100%', height: previewSize?.height ?? '100%' }]}>
+  <View pointerEvents="none" style={[styles.absoluteOverlay, { width: previewSize?.width ?? '100%', height: previewSize?.height ?? '100%' }]}> 
                {previewSize && (
                  <>
                    
                    <View
                      style={[
                        styles.crosshairVertical,
-                       {
-                         left: Math.round(centerX) - Math.round(CROSSHAIR_THICKNESS / 2),
-                         height: Math.round(previewSize.height * lengthFactor) + Math.round(CROSSHAIR_CONTAINER_SIZE),
-                         top: Math.round(previewSize.height * ((1 - lengthFactor) / 2)) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2),
-                         width: CROSSHAIR_THICKNESS,
-                       },
+                       { left: Math.round(centerX) - Math.round(CROSSHAIR_THICKNESS / 2), height: Math.round(previewSize.height * lengthFactor) + Math.round(CROSSHAIR_CONTAINER_SIZE), top: Math.round(previewSize.height * ((1 - lengthFactor) / 2)) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), width: CROSSHAIR_THICKNESS },
                      ]}
                    />
 
                    <View
                      style={[
                        styles.crosshairHorizontal,
-                       {
-                         top: Math.round(centerY) - Math.round(CROSSHAIR_THICKNESS / 2),
-                         width: Math.round(previewSize.width * lengthFactor) + Math.round(CROSSHAIR_CONTAINER_SIZE),
-                         left: Math.round(previewSize.width * ((1 - lengthFactor) / 2)) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2),
-                         height: CROSSHAIR_THICKNESS,
-                       },
+                       { top: Math.round(centerY) - Math.round(CROSSHAIR_THICKNESS / 2), width: Math.round(previewSize.width * lengthFactor) + Math.round(CROSSHAIR_CONTAINER_SIZE), left: Math.round(previewSize.width * ((1 - lengthFactor) / 2)) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), height: CROSSHAIR_THICKNESS },
                      ]}
                    />
                    <View pointerEvents="none" style={[styles.fillerBar, { left: Math.round(centerX) - Math.round((CROSSHAIR_CONTAINER_SIZE * 1.2) / 2), top: Math.round(centerY) - Math.round((CROSSHAIR_THICKNESS + 1) / 2), width: Math.round(CROSSHAIR_CONTAINER_SIZE * 1.2), height: CROSSHAIR_THICKNESS + 1 }]} />
@@ -1014,13 +997,10 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                      { width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, left: crosshairPos.x - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), top: crosshairPos.y - Math.round(CROSSHAIR_CONTAINER_SIZE / 2) },
                    ]}
                  >
-                   <View style={{ width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, alignItems: 'center', justifyContent: 'center' }}>
-                     
-                     <View style={{ width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE/2), backgroundColor: 'rgba(255,0,0,0.95)' }} />
-                     
-                     <View style={{ position: 'absolute', width: 2, height: CROSSHAIR_CONTAINER_SIZE * 2, backgroundColor: 'white' }} />
-                     
-                     <View style={{ position: 'absolute', height: 2, width: CROSSHAIR_CONTAINER_SIZE * 2, backgroundColor: 'white' }} />
+                   <View style={[styles.crosshairInner, { width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE }]}>
+                     <View style={[{ width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE/2) }, styles.crosshairDotBase]} />
+                     <View style={[styles.crosshairLineBase, { width: 2, height: CROSSHAIR_CONTAINER_SIZE * 2 }]} />
+                     <View style={[styles.crosshairLineBase, { height: 2, width: CROSSHAIR_CONTAINER_SIZE * 2 }]} />
                    </View>
                  </View>
                ) : (
@@ -1032,10 +1012,10 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                        { width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, left: Math.round(previewSize.width / 2) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), top: Math.round(previewSize.height / 2) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2) },
                      ]}
                    >
-                     <View style={{ width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, alignItems: 'center', justifyContent: 'center' }}>
-                       <View style={{ width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE/2), backgroundColor: 'rgba(255,0,0,0.95)' }} />
-                       <View style={{ position: 'absolute', width: 2, height: CROSSHAIR_CONTAINER_SIZE * 2, backgroundColor: 'white' }} />
-                       <View style={{ position: 'absolute', height: 2, width: CROSSHAIR_CONTAINER_SIZE * 2, backgroundColor: 'white' }} />
+                     <View style={[styles.crosshairInner, { width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE }]}>
+                       <View style={[{ width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE/2) }, styles.crosshairDotBase]} />
+                       <View style={[styles.crosshairLineBase, { width: 2, height: CROSSHAIR_CONTAINER_SIZE * 2 }]} />
+                       <View style={[styles.crosshairLineBase, { height: 2, width: CROSSHAIR_CONTAINER_SIZE * 2 }]} />
                      </View>
                    </View>
                  )
@@ -1060,8 +1040,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           )}
         </View>
       </TouchableWithoutFeedback>
-
-        
+      
         <View style={styles.infoArea}>
           
           <View style={styles.inlineSwatchRow}>

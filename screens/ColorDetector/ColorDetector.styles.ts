@@ -26,6 +26,12 @@ export const styles = StyleSheet.create({
   // Crosshair base: lines will be sized at render time to match the preview size
   crosshairVertical: { position: 'absolute', width: 2, backgroundColor: '#fff', borderRadius: 0, elevation: 4 },
   crosshairHorizontal: { position: 'absolute', height: 2, backgroundColor: '#fff', borderRadius: 0, elevation: 4 },
+  animatedImageAbsolute: { position: 'absolute' },
+  animatedFull: { width: '100%', height: '100%' },
+  selectedImage: { resizeMode: 'cover' },
+  crosshairInner: { alignItems: 'center', justifyContent: 'center' },
+  crosshairDotBase: { backgroundColor: 'rgba(255,0,0,0.95)' },
+  crosshairLineBase: { position: 'absolute', backgroundColor: 'white' },
   // Container for the preview area (keeps even margins and centers inner preview)
   cameraPreviewContainer: { width: '100%', maxWidth: width - 32, alignSelf: 'center', aspectRatio: 4 / 3, borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', position: 'relative' },
   // Inner preview fills the container (used for RNCamera or VisionCamera component)
