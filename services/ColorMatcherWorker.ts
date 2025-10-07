@@ -82,8 +82,8 @@ export async function findClosestColorAsync(rgb: number[], topN = 3): Promise<an
       setTimeout(async () => {
         if (pending[id]) {
           try {
-            const res = syncFind(rgb, topN);
-            pending[id](res);
+            const _res = syncFind(rgb, topN);
+            pending[id](_res);
             delete pending[id];
           } catch (e) {
             pending[id](null);
@@ -93,9 +93,9 @@ export async function findClosestColorAsync(rgb: number[], topN = 3): Promise<an
       }, 800);
     } catch (e) {
       try {
-        const res = syncFind(rgb, topN);
+        const _res = syncFind(rgb, topN);
         delete pending[id];
-        resolve(res);
+        resolve(_res);
       } catch (_e) {
         delete pending[id];
         resolve(null);
@@ -112,7 +112,7 @@ export async function pingWorker(timeout = 800): Promise<boolean> {
     if (!w) return false;
     return await new Promise<boolean>((resolve) => {
       const id = String(nextId++);
-      const onResolved = (res: any) => { resolve(true); };
+  const onResolved = (_res: any) => { resolve(true); };
       pending[id] = onResolved;
       try {
         const msg = { type: 'match', id, rgb: [0,0,0], topN: 1 };
