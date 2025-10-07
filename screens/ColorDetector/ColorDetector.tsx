@@ -469,7 +469,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
 
   const onAdjustToggle = () => { setAdjusting((v) => { const next = !v; if (!next) setTimeout(() => clampPanToBounds(), 10); return next; }); };
 
-  const decodeJpegAndSampleCenter = (base64: string): { r:number,g:number,b:number } | null => { const { jpegjs: _jpegjs, BufferShim: _BufferShim } = getJpegUtils(); if (!_jpegjs || !_BufferShim) return null; try { if (base64.length > 5_000_000) return null; const buffer = _BufferShim.from(base64, 'base64'); const decoded = _jpegjs.decode(buffer, {useTArray: true}); if (!decoded || !decoded.width || !decoded.data) return null; const w = decoded.width; const h = decoded.height; const data = decoded.data; const cx = Math.floor(w/2); const cy = Math.floor(h/2); const half = 4; let rSum = 0, gSum = 0, bSum = 0, count = 0; for (let yy = Math.max(0, cy-half); yy <= Math.min(h-1, cy+half); yy++) { for (let xx = Math.max(0, cx-half); xx <= Math.min(w-1, cx+half); xx++) { const idx = (yy * w + xx) * 4; const r = data[idx]; const g = data[idx+1]; const b = data[idx+2]; rSum += r; gSum += g; bSum += b; count++; } } if (count === 0) return null; return { r: Math.round(rSum/count), g: Math.round(gSum/count), b: Math.round(bSum/count) }; } catch (e) { return null; } };
+  
 
 
   const captureAndSampleCenter = async (): Promise<any> => {
@@ -497,8 +497,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
             } catch (_e) {
               try {
                 const RNFS = require('react-native-fs');
-                const base64 = await RNFS.readFile(normalizedUri.replace('file://',''), 'base64');
-                const sample = decodeJpegAndSampleCenter(base64);
+                    const base64 = await RNFS.readFile(normalizedUri.replace('file://',''), 'base64');
+                    const sample = _decodeCenter(base64);
                 if (sample) {
                   const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
                   if (match) return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -508,7 +508,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
             }
           }
           if ((photo as any)?.base64) {
-            const sample = decodeJpegAndSampleCenter((photo as any).base64);
+            const sample = _decodeCenter((photo as any).base64);
             if (sample) {
               const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
               if (match) return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -523,7 +523,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         try {
           const pic = await ref[takePicMethod]({ quality: 0.5, base64: true, width: 640, doNotSave: true });
           if (pic && pic.base64) {
-            const sample = decodeJpegAndSampleCenter(pic.base64);
+            const sample = _decodeCenter(pic.base64);
             if (sample) {
               const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
               if (match) return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -580,46 +580,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     return false;
   };
 
-  const decodeJpegAndSampleAt = (base64: string, relX: number, relY: number): { r:number,g:number,b:number } | null => {
-    const { jpegjs: _jpegjs, BufferShim: _BufferShim } = getJpegUtils();
-    if (!_jpegjs || !_BufferShim) return null;
-    try {
-      if (base64.length > 8_000_000) {
-        return null;
-      }
-       const buffer = _BufferShim.from(base64, 'base64');
-    const decoded = _jpegjs.decode(buffer, {useTArray: true});
-      if (!decoded || !decoded.width || !decoded.data) return null;
-      const w = decoded.width;
-      const h = decoded.height;
-      const data = decoded.data;
-
-      const pw = previewLayout.current.width || 0;
-      const ph = previewLayout.current.height || 0;
-      if (!pw || !ph) {
-        return decodeJpegAndSampleCenter(base64);
-      }
-      const ix = Math.max(0, Math.min(w - 1, Math.round((relX / pw) * w)));
-      const iy = Math.max(0, Math.min(h - 1, Math.round((relY / ph) * h)));
-
-      const half = 4;
-      let rSum = 0, gSum = 0, bSum = 0, count = 0;
-      for (let yy = Math.max(0, iy - half); yy <= Math.min(h - 1, iy + half); yy++) {
-        for (let xx = Math.max(0, ix - half); xx <= Math.min(w - 1, ix + half); xx++) {
-          const idx = (yy * w + xx) * 4;
-          const r = data[idx];
-          const g = data[idx+1];
-          const b = data[idx+2];
-          rSum += r; gSum += g; bSum += b; count++;
-        }
-      }
-      if (count === 0) return null;
-      const sampled = { r: Math.round(rSum/count), g: Math.round(gSum/count), b: Math.round(bSum/count) };
-      return sampled;
-    } catch (e) {
-      return null;
-    }
-  };
+  
 
   const captureAndSampleAt = async (relX: number, relY: number): Promise<any> => {
     setCapturing(true);
@@ -656,7 +617,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
               try {
                 const RNFS = require('react-native-fs');
                 const base64 = await RNFS.readFile(normalizedUri.replace('file://',''), 'base64');
-                const sample = decodeJpegAndSampleAt(base64, relX, relY);
+                const sample = _decodeAt(base64, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
                 if (sample) {
                   const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
                   if (match) return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -667,7 +628,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           }
 
           if ((photo as any)?.base64) {
-            const sample = decodeJpegAndSampleAt((photo as any).base64, relX, relY);
+            const sample = _decodeAt((photo as any).base64, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
             if (sample) {
               const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
               if (match) return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -682,7 +643,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         try {
           const pic = await (cameraRef.current as any)[takePicMethod]({ quality: 0.5, base64: true, width: 640, doNotSave: true });
           if (pic && pic.base64) {
-            const sample = decodeJpegAndSampleAt(pic.base64, relX, relY);
+            const sample = _decodeAt(pic.base64, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
             if (sample) {
               const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
               if (match) return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
@@ -788,7 +749,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       const pw = previewLayout.current.width || 0;
       const ph = previewLayout.current.height || 0;
       if (!pw || !ph) {
-        const centerSample = decodeJpegAndSampleCenter(base64);
+  const centerSample = _decodeCenter(base64);
         if (!centerSample) return null;
         const match = await findClosestColorAsync([centerSample.r, centerSample.g, centerSample.b], 3).catch(() => null);
         if (!match) return null;
