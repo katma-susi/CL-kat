@@ -35,18 +35,6 @@ function normalizeHex(hex: string): string {
   return hex.toLowerCase();
 }
 
-function hexToLab(hex: string) {
-  const h = normalizeHex(hex);
-  const c = new Color(h);
-  return c.to('lab');
-}
-
-function rgbToLab(rgb: number[]) {
-  const srgb: [number, number, number] = [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255];
-  const c = new (Color as any)('srgb', srgb as any);
-  return c.to('lab');
-}
-
 type PrecomputedRow = ColorRow & { labColor: any };
 type PrecomputedRowRGB = PrecomputedRow & { rgb: [number, number, number] };
 const PRECOMPUTED_DATASET: PrecomputedRowRGB[] = (dataset as ColorRow[]).map((row) => {
