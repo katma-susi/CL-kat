@@ -26,7 +26,7 @@ const CROSSHAIR_THICKNESS = 2;
 const CROSSHAIR_DOT_SIZE = 10;
 const CROSSHAIR_DOT_BORDER = 2;
 const CROSSHAIR_CONTAINER_SIZE = CROSSHAIR_DOT_SIZE + CROSSHAIR_DOT_BORDER * 2;
-const ADJUST_TOP_FACTOR = 0.06;
+
 
 interface ColorDetectorProps {
   onBack: () => void;
@@ -49,7 +49,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   const cameraRef = useRef<any>(null);
   const previewLayout = useRef<{x:number,y:number,width:number,height:number}>({ x:0,y:0,width:0,height:0 });
   const previewRef = useRef<any>(null);
-  const cameraContainerRef = useRef<any>(null);
+  
   const frozenImageUriRef = useRef<string | null>(null);
   const [previewSize, setPreviewSize] = useState<{width:number,height:number} | null>(null);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
@@ -59,7 +59,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   const panResponder = useRef<any>(null);
   const [imageNaturalSize, setImageNaturalSize] = useState<{w:number,h:number} | null>(null);
   const [imageScaledSize, setImageScaledSize] = useState<{w:number,h:number} | null>(null);
-  const [uploadDebug, setUploadDebug] = useState<any | null>(null);
+  
   const suppressSpeechRef = useRef<boolean>(false);
   const freezeSpeakTimersRef = useRef<number[]>([]);
   const lastSpokenRef = useRef<number>(0);
@@ -79,8 +79,6 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       return false;
     }
   };
-
-  useEffect(() => () => {}, []);
 
   useEffect(() => { try { initTts(); } catch (_e) {} }, []);
 
@@ -723,7 +721,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
               const ph = previewLayout.current.height || 0;
               const mappedPreviewX = relX;
               const mappedPreviewY = relY;
-              setUploadDebug({ imageLeft: 0, imageTop: 0, scaledW: pw, scaledH: ph, ix: null, iy: null, mappedPreviewX, mappedPreviewY, sampled: snapSample, via: 'snapshot' });
+              
               return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
             }
           }
@@ -754,7 +752,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
               const imageTop = Math.round((ph - scaled.h) / 2) + panY;
               const mappedPreviewX = relX;
               const mappedPreviewY = relY;
-              setUploadDebug({ imageLeft, imageTop, scaledW: scaled.w, scaledH: scaled.h, ix: null, iy: null, mappedPreviewX, mappedPreviewY, sampled: nativeSample });
+            
             } catch (_e) { }
             return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
           }
@@ -866,7 +864,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   try {
     const mappedPreviewX = imageLeft + (ix / w) * scaled.w;
     const mappedPreviewY = imageTop + (iy / h) * scaled.h;
-    setUploadDebug({ imageLeft, imageTop, scaledW: scaled.w, scaledH: scaled.h, ix, iy, mappedPreviewX, mappedPreviewY, sampled });
+  
   } catch (_e) { }
   const match = await findClosestColorAsync([sampled.r, sampled.g, sampled.b], 3).catch(() => null);
   if (!match) return null;
@@ -901,7 +899,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         <View style={styles.cameraArea}>
           <View style={styles.previewWrapper}>
            {selectedImageUri ? (
-            <View ref={(el)=>{ cameraContainerRef.current = el; previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
+            <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
                       try {
                         const { width: pw, height: ph } = e.nativeEvent.layout;
                         previewLayout.current.width = pw;
@@ -938,7 +936,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
 
             </View>
            ) : RNCamera ? (
-             <View ref={(el)=>{ cameraContainerRef.current = el; previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
+             <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
                        try {
                          const { width: pw, height: ph } = e.nativeEvent.layout;
                          previewLayout.current.width = pw;
@@ -968,11 +966,11 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                }
 
                const finalDevice = availableDevice;
-                 if (finalDevice) {
-                 try {
-                   const CameraComp = VisionCamera.Camera;
-                     return (
-                     <View ref={(el)=>{ cameraContainerRef.current = el; previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
+                if (finalDevice) {
+                try {
+                  const CameraComp = VisionCamera.Camera;
+                    return (
+                    <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
                        try {
                          const { width: pw, height: ph } = e.nativeEvent.layout;
                          previewLayout.current.width = pw;
