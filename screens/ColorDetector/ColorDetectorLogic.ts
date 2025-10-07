@@ -1,7 +1,6 @@
 export function getFallbackColor() {
   return { family: 'Unknown', hex: '#000000', realName: 'Unknown' };
 }
-
 export const getJpegUtils = () => {
   try {
     const jpegjsLocal = require('jpeg-js');
@@ -11,7 +10,6 @@ export const getJpegUtils = () => {
     return { jpegjs: null, BufferShim: null };
   }
 };
-
 export const getJpegOrientation = (buf: any): number => {
   try {
     let arr: Uint8Array;
@@ -77,7 +75,6 @@ export const getJpegOrientation = (buf: any): number => {
   } catch (_e) {}
   return 1;
 };
-
 export const hexToRgb = (hex: string): number[] => {
   if (!hex) return [0,0,0];
   let h = hex.trim();
@@ -88,7 +85,6 @@ export const hexToRgb = (hex: string): number[] => {
   const b = parseInt(h.slice(4,6), 16) || 0;
   return [r,g,b];
 };
-
 export const decodeJpegAndSampleCenter = (base64: string): { r:number,g:number,b:number } | null => {
   const { jpegjs: _jpegjs, BufferShim: _BufferShim } = getJpegUtils();
   if (!_jpegjs || !_BufferShim) return null;
@@ -113,7 +109,6 @@ export const decodeJpegAndSampleCenter = (base64: string): { r:number,g:number,b
     return null;
   }
 };
-
 export function decodeJpegAndSampleAt(base64: string, relX: number, relY: number): { r:number,g:number,b:number } | null;
 export function decodeJpegAndSampleAt(base64: string, relX: number, relY: number, pw?: number, ph?: number): { r:number,g:number,b:number } | null;
 export function decodeJpegAndSampleAt(base64: string, relX: number, relY: number, pw?: number, ph?: number): { r:number,g:number,b:number } | null {
