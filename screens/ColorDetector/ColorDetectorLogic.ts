@@ -1,18 +1,10 @@
-// Logic helpers for ColorDetector. This module intentionally keeps pure/helper functions
-// used by the UI component so the UI file remains focused on rendering.
-
-// A deterministic fallback color to use when sampling fails (removed random fallback)
 export function getFallbackColor() {
   return { family: 'Unknown', hex: '#000000', realName: 'Unknown' };
 }
 
-// Lazy getter for jpeg and Buffer utilities (same as before)
 export const getJpegUtils = () => {
   try {
-    // require when actually decoding to reduce startup memory usage
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const jpegjsLocal = require('jpeg-js');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const BufferLocal = require('buffer').Buffer;
     return { jpegjs: jpegjsLocal, BufferShim: BufferLocal };
   } catch (_e) {
@@ -20,7 +12,6 @@ export const getJpegUtils = () => {
   }
 };
 
-// Read EXIF Orientation from a JPEG Buffer (returns 1..8 or 1 if unknown)
 export const getJpegOrientation = (buf: any): number => {
   try {
     let arr: Uint8Array;
@@ -87,7 +78,6 @@ export const getJpegOrientation = (buf: any): number => {
   return 1;
 };
 
-// Convert hex string (#rrggbb) to [r,g,b]
 export const hexToRgb = (hex: string): number[] => {
   if (!hex) return [0,0,0];
   let h = hex.trim();
@@ -99,7 +89,6 @@ export const hexToRgb = (hex: string): number[] => {
   return [r,g,b];
 };
 
-// decodeJpegAndSampleCenter: decode base64 JPEG and average a 9x9 block at center
 export const decodeJpegAndSampleCenter = (base64: string): { r:number,g:number,b:number } | null => {
   const { jpegjs: _jpegjs, BufferShim: _BufferShim } = getJpegUtils();
   if (!_jpegjs || !_BufferShim) return null;
@@ -110,7 +99,7 @@ export const decodeJpegAndSampleCenter = (base64: string): { r:number,g:number,b
     if (!decoded || !decoded.width || !decoded.data) return null;
     const w = decoded.width; const h = decoded.height; const data = decoded.data;
     const cx = Math.floor(w/2); const cy = Math.floor(h/2);
-    const half = 4; // 9x9
+    const half = 4;
     let rSum=0,gSum=0,bSum=0,count=0;
     for (let yy = Math.max(0, cy-half); yy <= Math.min(h-1, cy+half); yy++) {
       for (let xx = Math.max(0, cx-half); xx <= Math.min(w-1, cx+half); xx++) {
@@ -125,8 +114,9 @@ export const decodeJpegAndSampleCenter = (base64: string): { r:number,g:number,b
   }
 };
 
-// decodeJpegAndSampleAt: decode base64 JPEG and sample a ~9x9 block around mapped coords
-export const decodeJpegAndSampleAt = (base64: string, relX: number, relY: number, pw: number, ph: number): { r:number,g:number,b:number } | null => {
+export function decodeJpegAndSampleAt(base64: string, relX: number, relY: number): { r:number,g:number,b:number } | null;
+export function decodeJpegAndSampleAt(base64: string, relX: number, relY: number, pw?: number, ph?: number): { r:number,g:number,b:number } | null;
+export function decodeJpegAndSampleAt(base64: string, relX: number, relY: number, pw?: number, ph?: number): { r:number,g:number,b:number } | null {
   const { jpegjs: _jpegjs, BufferShim: _BufferShim } = getJpegUtils();
   if (!_jpegjs || !_BufferShim) return null;
   try {
@@ -151,4 +141,4 @@ export const decodeJpegAndSampleAt = (base64: string, relX: number, relY: number
   } catch (_e) {
     return null;
   }
-};
+}
