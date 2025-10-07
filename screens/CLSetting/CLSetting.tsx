@@ -17,7 +17,6 @@ interface CLSettingProps {
   onToggleShowFamily?: (v:boolean)=>void;
   onToggleShowRealName?: (v:boolean)=>void;
 }
-
 const CLSetting: React.FC<CLSettingProps> = ({ onBack, colorCodesVisible=true, voiceMode='family', onToggleColorCodes, onNavigateToYT, onChangeVoiceMode, showFamily=true, showRealName=true, onToggleShowFamily, onToggleShowRealName }) => {
   const [localColorCodesVisible, setLocalColorCodesVisible] = useState<boolean>(colorCodesVisible);
   const [localVoiceMode, setLocalVoiceMode] = useState<'family'|'real'|'disable'>(voiceMode);
@@ -27,14 +26,12 @@ const CLSetting: React.FC<CLSettingProps> = ({ onBack, colorCodesVisible=true, v
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
 
   const saveAndBack = () => {
-    console.log('CLSetting: saving settings', { localColorCodesVisible, localVoiceMode });
     onToggleColorCodes && onToggleColorCodes(localColorCodesVisible);
     onToggleShowFamily && onToggleShowFamily(localShowFamily);
     onToggleShowRealName && onToggleShowRealName(localShowRealName);
     onChangeVoiceMode && onChangeVoiceMode(localVoiceMode);
     onBack();
   };
-
   return (
     <View style={styles.container}>
   <TouchableOpacity onPress={saveAndBack} style={styles.backButton} hitSlop={{ top: 10, left: 10, bottom: 10, right: 10 }}>
@@ -67,7 +64,6 @@ const CLSetting: React.FC<CLSettingProps> = ({ onBack, colorCodesVisible=true, v
           </View>
           <Switch value={localShowRealName} onValueChange={(v)=>{ setLocalShowRealName(v); onToggleShowRealName && onToggleShowRealName(v); }} />
         </View>
-
         
   <View style={styles.voiceSection}>
           <Text style={styles.label}>Say the color</Text>
@@ -147,8 +143,6 @@ For bug reports, feature requests, or help, contact us at:
             </TouchableOpacity>
           </View>
         )}
-
-        
         <TouchableOpacity
           style={styles.fabMain}
           onPress={() => setFabOpen(v => !v)}
@@ -161,8 +155,4 @@ For bug reports, feature requests, or help, contact us at:
     </View>
   );
 };
-
 export default CLSetting;
-
-// AboutModal removed: using Alert.alert for About text
-
