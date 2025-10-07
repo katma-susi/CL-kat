@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Alert, TouchableWithoutFeedback, Platform, PermissionsAndroid, Image, PanResponder, Animated } from 'react-native';
-// view-shot used to capture the rendered preview for exact-on-screen sampling
 let captureRef: any = null;
 try { captureRef = require('react-native-view-shot').captureRef; } catch (_e) { captureRef = null; }
 import { ICONS } from '../../Images';
@@ -10,7 +9,6 @@ import { findClosestColor } from '../../services/ColorMatcher';
 import { findClosestColorAsync } from '../../services/ColorMatcherWorker';
 import { speak, initTts, stop as stopTts } from '../../utils/tts';
 
-// Optional camera modules (lazy-require)
 let RNCamera: any = null;
 let VisionCamera: any = null;
 try { RNCamera = require('react-native-camera').RNCamera; } catch (err) { RNCamera = null; }
@@ -1651,110 +1649,11 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     }
   };
 
-  const sampleColorAtCenter = () => {
-    // If we already have a frozen snapshot (user froze but didn't tap), use that
-    if (frozenSnapshot) {
-      const s = frozenSnapshot;
-      setDetected(s);
-      if (voiceEnabled && voiceMode !== 'disable') {
-        try { safeSpeak(voiceMode === 'real' ? s.realName : s.family); } catch (_e) {}
-      }
-      return;
-    }
-    // If we have a recent liveDetected value, use that to avoid capturing when unnecessary
-    if (liveDetected) {
-      const s = liveDetected;
-      setDetected(s);
-      setFrozenSnapshot(s);
-      if (voiceEnabled && voiceMode !== 'disable') {
-        try { safeSpeak(voiceMode === 'real' ? s.realName : s.family); } catch (_e) {}
-      }
-      return;
-    }
-
-    // Otherwise, fall back to capturing a center sample
-    captureAndSampleCenter().then((c:any) => {
-      if (c) {
-        setDetected(c);
-        setFrozenSnapshot(c);
-        if (voiceEnabled && voiceMode !== 'disable') {
-          try { safeSpeak(voiceMode === 'real' ? c.realName : c.family); } catch (_e) {}
-        }
-      } else {
-  const sampled = getFallbackColor();
-        setDetected(sampled);
-        setFrozenSnapshot(sampled);
-      }
-    }).catch((_err: any) => {
-  const sampled = getFallbackColor();
-      setDetected(sampled);
-      setFrozenSnapshot(sampled);
-    });
-  };
+  // sampleColorAtCenter removed: center-sampling can be achieved via captureAndSampleCenter
 
 
-  // Debug helper: try multiple capture methods and report what each returns (visible Alert + logs)
-  const debugCapture = async () => {
-    if (!cameraRef.current) {
-      Alert.alert('Debug Capture', 'No camera ref available');
-      return;
-    }
-    setCapturing(true);
-    const results: any[] = [];
-    try {
-      // try takePhoto (VisionCamera style)
-      if ((cameraRef.current as any).takePhoto) {
-        try {
-          debugLog('[ColorDetector][debug] calling takePhoto');
-          const photo = await (cameraRef.current as any).takePhoto({ qualityPrioritization: 'speed', skipMetadata: true });
-          debugLog('[ColorDetector][debug] takePhoto -> keys', photo ? Object.keys(photo) : null);
-          results.push({ method: 'takePhoto', ok: true, photo });
-        } catch (err) {
-          debugLog('[ColorDetector][debug] takePhoto error', err);
-          results.push({ method: 'takePhoto', ok: false, err: String(err) });
-        }
-      }
-
-      // try takePictureAsync (RNCamera style)
-      if ((cameraRef.current as any).takePictureAsync) {
-        try {
-          debugLog('[ColorDetector][debug] calling takePictureAsync');
-          const pic = await (cameraRef.current as any).takePictureAsync({ quality: 0.5, base64: true, width: 1024, doNotSave: true });
-          debugLog('[ColorDetector][debug] takePictureAsync -> base64Length', pic?.base64?.length ?? 0);
-          results.push({ method: 'takePictureAsync', ok: true, pic: { hasBase64: !!pic?.base64, keys: Object.keys(pic || {}) } });
-        } catch (err) {
-          debugLog('[ColorDetector][debug] takePictureAsync error', err);
-          results.push({ method: 'takePictureAsync', ok: false, err: String(err) });
-        }
-      }
-
-      // try cameraRef.capture if present
-      if ((cameraRef.current as any).capture) {
-        try {
-          debugLog('[ColorDetector][debug] calling capture');
-          const cap = await (cameraRef.current as any).capture({ quality: 0.5, base64: true });
-          debugLog('[ColorDetector][debug] capture -> keys', cap ? Object.keys(cap) : null);
-          results.push({ method: 'capture', ok: true, cap });
-        } catch (err) {
-          debugLog('[ColorDetector][debug] capture error', err);
-          results.push({ method: 'capture', ok: false, err: String(err) });
-        }
-      }
-
-      // Summarize
-      const okOne = results.find((r) => r.ok);
-      Alert.alert('Debug Capture Results', JSON.stringify(results, null, 2).slice(0, 2000));
-  debugLog('[ColorDetector][debug] results', results);
-      if (!okOne) {
-        Alert.alert('Debug Capture', 'All capture methods failed. See console logs for details.');
-      }
-    } catch (err) {
-  debugLog('[ColorDetector][debug] debugCapture unexpected error', err);
-      Alert.alert('Debug Capture', 'Unexpected error: ' + String(err));
-    } finally {
-      setCapturing(false);
-    }
-  };
+  // (removed) debugCapture helper - it was only used for local debugging and is not
+  // referenced elsewhere. Keeping codebase clean by deleting the helper.
 
   const onPreviewTap = (evt: any) => {
     if (selectedImageUri && !adjusting) {

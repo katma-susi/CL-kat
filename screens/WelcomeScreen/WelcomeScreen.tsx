@@ -14,7 +14,6 @@ import { styles } from './WelcomeScreen.styles';
 interface WelcomeScreenProps {
   onNext: () => void;
 }
-
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onNext }) => {
   const { width } = Dimensions.get('window');
 
