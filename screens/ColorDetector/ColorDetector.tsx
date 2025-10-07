@@ -472,11 +472,11 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       const textToSpeak = voiceMode === 'real' ? liveDetected.realName : liveDetected.family;
   const ok = safeSpeak(textToSpeak);
       lastSpokenRef.current = now;
-      if (!ok) Alert.alert('Color', textToSpeak);
+      if (!ok) debugLog('[ColorDetector] live speak returned falsy ->', textToSpeak);
     } catch (err) {
   debugLog('TTS speak failed', err);
       const textToSpeak = voiceMode === 'real' ? liveDetected.realName : liveDetected.family;
-      Alert.alert('Color', textToSpeak);
+      debugLog('[ColorDetector] live speak threw ->', textToSpeak);
     }
   }, [liveDetected, voiceEnabled, freeze, voiceMode]);
 
@@ -886,6 +886,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   // Pick an image from the phone's library and treat it as a sampled frame.
   const pickImage = async () => {
     try {
+      // Temporarily suppress live automatic speech while we process the uploaded image
+      try { suppressSpeechRef.current = true; } catch (_e) {}
       // Lazy-require so the project doesn't hard-depend on the native module at build-time
       let ImagePicker: any = null;
       try { ImagePicker = require('react-native-image-picker'); } catch (err) { ImagePicker = null; }
@@ -894,7 +896,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         return;
       }
 
-      // Use the callback API since different versions expose different shapes
+    // Use the callback API since different versions expose different shapes
   ImagePicker.launchImageLibrary({ mediaType: 'photo' }, async (response: any) => {
         try {
           if (!response) return;
@@ -913,6 +915,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                 // ignore
               }
           setSelectedImageUri(uri);
+          try { setFreeze(true); freezeRef.current = true; } catch (_e) {}
           // clear any stored frozen image when a new uploaded image is chosen
           frozenImageUriRef.current = null;
           // Sample the uploaded image at the center of the preview to provide an initial detected color
@@ -981,6 +984,10 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         } catch (innerErr) {
           debugLog('image pick callback failed', innerErr);
         }
+        // restore speech suppression a short time after processing completes so we don't
+        // accidentally speak stale live detection data. Small delay ensures any follow-up
+        // processing (sampling, decoding) has a chance to update state first.
+        try { setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 300); } catch (_e) {}
       });
     } catch (err) {
   debugLog('pickImage failed', err);

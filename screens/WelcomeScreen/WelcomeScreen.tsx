@@ -4,11 +4,11 @@ import {
   Text,
   TouchableOpacity,
   StatusBar,
-  SafeAreaView,
   ScrollView,
   Dimensions,
   PixelRatio,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { styles } from './WelcomeScreen.styles';
 
 interface WelcomeScreenProps {
@@ -18,10 +18,8 @@ interface WelcomeScreenProps {
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onNext }) => {
   const { width } = Dimensions.get('window');
 
-  // Baseline is iPhone 8 width ~375. Scale fonts/paddings relative to that.
   const scale = useMemo(() => {
     const s = width / 375;
-    // clamp scale to reasonable bounds
     return Math.max(0.85, Math.min(s, 1.25));
   }, [width]);
 
@@ -49,7 +47,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onNext }) => {
           paddingTop: 20,
           paddingBottom: 12,
         }}
-        accessibilityLabel="Welcome scroll"
       >
         <View style={styles.content}>
           <Text
@@ -57,8 +54,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onNext }) => {
               styles.title,
               { fontSize: scaled.titleSize, marginBottom: scaled.titleMargin },
             ]}
-            accessibilityRole="header"
-            accessibilityLabel="Welcome to ColorLens"
           >
             Welcome
           </Text>
@@ -117,8 +112,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onNext }) => {
           ]}
           onPress={onNext}
           activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel="Go to next screen"
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Text style={styles.nextButtonText}>Next</Text>
