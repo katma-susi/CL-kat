@@ -1,7 +1,3 @@
-// Wrapper that exposes an async findClosestColorAsync(rgb, topN)
-// It will try to use react-native-threads to spawn a worker running services/colorWorker.js
-// If threads aren't available, it will fall back to the synchronous findClosestColor exported by ColorMatcher.
-
 import { findClosestColor as syncFind } from './ColorMatcher';
 
 type ResolveMap = { [id: string]: (res: any) => void };
@@ -12,18 +8,14 @@ let nextId = 1;
 async function createWorkerIfNeeded() {
   if (worker) return worker;
   try {
-    // Prefer newer worker lib if available (react-native-worker-threads)
     let Threads: any = null;
     try { Threads = require('react-native-worker-threads'); } catch (_e) { Threads = null; }
     if (!Threads) {
       try { Threads = require('react-native-threads'); } catch (_e) { Threads = null; }
     }
     if (!Threads) throw new Error('no-threads-lib');
-    // spawn thread pointing to our worker file
-    // react-native-worker-threads exposes spawn, react-native-threads uses Thread
     if (Threads.spawn) {
       worker = Threads.spawn('./services/colorWorker.js');
-      // worker.on is used by react-native-worker-threads
       if (worker.on) {
         worker.on('message', (msg: any) => {
           try {
@@ -38,9 +30,7 @@ async function createWorkerIfNeeded() {
           } catch (_e) {}
         });
       }
-      // worker.postMessage available
     } else {
-      // react-native-threads style
       worker = new Threads.Thread('./services/colorWorker.js');
       worker.onmessage = (msg: any) => {
         try {
@@ -70,7 +60,6 @@ async function createWorkerIfNeeded() {
     worker.postMessage = worker.postMessage || worker.post || (worker.send && ((m: any) => worker.send(m)));
     return worker;
   } catch (e) {
-    // threads not available: keep worker null and fallback to sync
     return null;
   }
 }
@@ -78,7 +67,6 @@ async function createWorkerIfNeeded() {
 export async function findClosestColorAsync(rgb: number[], topN = 3): Promise<any> {
   const w = await createWorkerIfNeeded();
   if (!w) {
-    // fallback: synchronous call
     try {
       return Promise.resolve(syncFind(rgb, topN));
     } catch (e) {
@@ -91,7 +79,6 @@ export async function findClosestColorAsync(rgb: number[], topN = 3): Promise<an
     try {
       const msg = { type: 'match', id, rgb, topN };
       w.postMessage(JSON.stringify(msg));
-      // timeout safety: resolve with sync fallback after 800ms
       setTimeout(async () => {
         if (pending[id]) {
           try {
@@ -105,7 +92,6 @@ export async function findClosestColorAsync(rgb: number[], topN = 3): Promise<an
         }
       }, 800);
     } catch (e) {
-      // if postMessage fails, fallback sync
       try {
         const res = syncFind(rgb, topN);
         delete pending[id];
@@ -120,8 +106,6 @@ export async function findClosestColorAsync(rgb: number[], topN = 3): Promise<an
 
 export default { findClosestColorAsync };
 
-// lightweight runtime probe — attempt to create the worker and post a ping message.
-// resolves to true if worker was created and responded, false otherwise.
 export async function pingWorker(timeout = 800): Promise<boolean> {
   try {
     const w = await createWorkerIfNeeded();

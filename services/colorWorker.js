@@ -1,7 +1,3 @@
-// Simple worker for color matching. Runs inside react-native-threads if available.
-// Listens for JSON messages: { type: 'match', id, rgb, topN }
-// Replies with JSON: { type: 'result', id, result }
-
 const Color = require('colorjs.io');
 const dataset = require('../colormodel.json');
 
@@ -21,7 +17,6 @@ function rgbToLab(rgb) {
   return c.to('lab');
 }
 
-// Precompute dataset lab and rgb
 const PRE = (dataset || []).map((row) => {
   try {
     let labColor = null;
@@ -87,18 +82,7 @@ function findClosest(rgb, topN) {
   }
 }
 
-// react-native-threads will expose a global postMessage/onmessage when running as a thread.
-function tryWire() {
-  try {
-    if (typeof global?.onmessage === 'function' || typeof onmessage === 'function') {
-      // already wired by environment
-    }
-  } catch (e) {
-    // ignore
-  }
-}
 
-// Message handler (works in both RN Thread and node-like envs that expose onmessage)
 const handleMessage = (raw) => {
   try {
     const msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -110,11 +94,9 @@ const handleMessage = (raw) => {
         if (typeof postMessage === 'function') postMessage(JSON.stringify(out));
         else if (typeof global?.postMessage === 'function') global.postMessage(JSON.stringify(out));
       } catch (e) {
-        // ignore
       }
     }
   } catch (e) {
-    // ignore
   }
 };
 
@@ -126,4 +108,3 @@ if (typeof self !== 'undefined' && typeof self.onmessage !== 'undefined') {
   global.onmessage = (ev) => handleMessage(ev.data);
 }
 
-tryWire();
