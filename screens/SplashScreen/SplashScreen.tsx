@@ -6,7 +6,6 @@ import { IMAGES } from '../../Images';
 interface SplashScreenProps {
   onFinish: () => void;
 }
-
 const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
   useEffect(() => {
     const timer = setTimeout(onFinish, 3000); // show for 3 seconds

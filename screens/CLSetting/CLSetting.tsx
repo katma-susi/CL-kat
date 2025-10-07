@@ -88,7 +88,6 @@ const CLSetting: React.FC<CLSettingProps> = ({ onBack, colorCodesVisible=true, v
             )}
           </View>
         </View>
-
       </ScrollView>
 
       <View style={styles.fabContainer}>
@@ -151,7 +150,6 @@ For bug reports, feature requests, or help, contact us at:
           <Text style={styles.fabMainIcon}>{fabOpen ? '✕' : '?'}</Text>
         </TouchableOpacity>
       </View>
-  
     </View>
   );
 };

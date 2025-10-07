@@ -1,7 +1,6 @@
 /**
  * @format
  */
-
 import React, { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -13,7 +12,7 @@ import CLSetting from './screens/CLSetting/CLSetting';
 
 const App: React.FC = () => {
 
-  const [currentScreen, setCurrentScreen] = useState<'splash' | 'welcome' | 'decision' | 'youtube' | 'main' | 'colorDetector' | 'settings' | 'cbc' | 'simulate'>('splash');
+  const [currentScreen, setCurrentScreen] = useState<'splash' | 'welcome' | 'youtube' | 'colorDetector' | 'settings'>('splash');
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [colorCodesVisible, setColorCodesVisible] = useState(true);
   const [showFamily, setShowFamily] = useState(true);
@@ -23,25 +22,16 @@ const App: React.FC = () => {
   const handleSplashFinish = () => {
     setCurrentScreen('welcome');
   };
-
   const handleWelcomeNext = () => {
-    // Skip decision screen — go straight to ColorDetector
     setCurrentScreen('colorDetector');
   };
-
   const handleNavigateToYT = () => {
-    // Navigate to the YouTube embed screen
-    console.log('handleNavigateToYT called — navigating to youtube screen');
     setCurrentScreen('youtube');
   };
 
   const handleBackFromYT = () => {
-    // Return to Settings (CLSetting) when leaving the YouTube screen
     setCurrentScreen('settings');
   };
-
-  // navigation helpers (used elsewhere)
-
   return (
     <SafeAreaProvider>
       <View style={styles.container}>
@@ -84,14 +74,9 @@ const App: React.FC = () => {
     </SafeAreaProvider>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  mainContent: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
   },
 });
 

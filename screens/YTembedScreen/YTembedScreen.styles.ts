@@ -15,6 +15,10 @@ export const styles = StyleSheet.create({
     borderBottomColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   backButton: {
     paddingVertical: 0,
     paddingHorizontal: 0,
@@ -46,7 +50,7 @@ export const styles = StyleSheet.create({
     flex: 1,
   },
   videoContainer: {
-    height: height * 0.4, // 40% of screen height
+    height: height * 0.4,
     margin: 20,
     borderRadius: 12,
     overflow: 'hidden',
