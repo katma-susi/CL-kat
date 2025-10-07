@@ -68,8 +68,7 @@ const CLSetting: React.FC<CLSettingProps> = ({ onBack, colorCodesVisible=true, v
           <Switch value={localShowRealName} onValueChange={(v)=>{ setLocalShowRealName(v); onToggleShowRealName && onToggleShowRealName(v); }} />
         </View>
 
-        {/* Enable Voice controlled via 'Say the color' -> Disable option; no separate switch */}
-
+        
   <View style={styles.voiceSection}>
           <Text style={styles.label}>Say the color</Text>
           <Text style={styles.note}>selected: {localVoiceMode === 'family' ? 'Family Color' : localVoiceMode === 'real' ? 'Real Name' : 'Disabled'}</Text>
@@ -96,9 +95,8 @@ const CLSetting: React.FC<CLSettingProps> = ({ onBack, colorCodesVisible=true, v
 
       </ScrollView>
 
-      {/* Moved FAB menu (About / Video Tutorial) from DecisionScreen here */}
       <View style={styles.fabContainer}>
-        {/* Submenu shown only when fabOpen is true */}
+        
         {fabOpen && (
           <View style={styles.fabSubmenu}>
             <TouchableOpacity
@@ -144,14 +142,13 @@ For bug reports, feature requests, or help, contact us at:
               <Text style={styles.fabSubmenuText} numberOfLines={1} ellipsizeMode="tail">About</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.fabSubmenuItem} onPress={()=>{ setFabOpen(false); onNavigateToYT && onNavigateToYT(); }}>
-              {/* Use the project's image asset for the YouTube icon (from Images.ts) */}
               <Image source={ICONS.YTicon} style={[styles.fabSubmenuIcon, styles.fabSubmenuImageSize]} />
               <Text style={styles.fabSubmenuText} numberOfLines={1} ellipsizeMode="tail">Video Tutorial</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Main FAB: shows '?' when closed, 'X' when open */}
+        
         <TouchableOpacity
           style={styles.fabMain}
           onPress={() => setFabOpen(v => !v)}
@@ -160,8 +157,7 @@ For bug reports, feature requests, or help, contact us at:
           <Text style={styles.fabMainIcon}>{fabOpen ? '✕' : '?'}</Text>
         </TouchableOpacity>
       </View>
-
-  {/* Save button removed per user request; settings apply immediately via callbacks */}
+  
     </View>
   );
 };

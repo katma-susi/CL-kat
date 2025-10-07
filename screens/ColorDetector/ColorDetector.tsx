@@ -1059,7 +1059,6 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
             <Text style={styles.infoValue}>{displayDetected?.realName ?? '—'}</Text>
           </View>
         )}
-
         <View style={styles.uploadRow}>
           <TouchableOpacity style={styles.uploadButton} onPress={pickImage} activeOpacity={0.8}>
             <View style={styles.uploadButtonContent}>
@@ -1071,7 +1070,6 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
             <Image source={{ uri: selectedImageUri }} style={styles.thumbnail} />
           )}
         </View>
-
         <TouchableOpacity style={[styles.freezeButton, freeze && styles.unfreezeButton]} onPress={toggleFreeze} activeOpacity={0.8}>
           <Text style={styles.freezeButtonText}>{freeze ? 'Unfreeze' : 'Freeze Frame'}</Text>
         </TouchableOpacity>
@@ -1079,5 +1077,4 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     </View>
   );
 };
-
 export default ColorDetector;
