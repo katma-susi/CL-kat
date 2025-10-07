@@ -20,12 +20,7 @@ try {
   const wc = require('react-native-worklets-core');
   if (wc && typeof runOnJS === 'function') workletsCoreAvailable = true;
 } catch (_e) { workletsCoreAvailable = false; }
-const CROSSHAIR_LENGTH_FACTOR = 0.5;
-const CROSSHAIR_LENGTH_FACTOR_FROZEN = 0.35;
-const CROSSHAIR_THICKNESS = 2;
-const CROSSHAIR_DOT_SIZE = 10;
-const CROSSHAIR_DOT_BORDER = 2;
-const CROSSHAIR_CONTAINER_SIZE = CROSSHAIR_DOT_SIZE + CROSSHAIR_DOT_BORDER * 2;
+import { CROSSHAIR_LENGTH_FACTOR, CROSSHAIR_LENGTH_FACTOR_FROZEN, CROSSHAIR_THICKNESS, CROSSHAIR_DOT_SIZE, CROSSHAIR_CONTAINER_SIZE } from './ColorDetector.styles';
 
 
 interface ColorDetectorProps {
@@ -1040,7 +1035,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           )}
         </View>
       </TouchableWithoutFeedback>
-      
+
         <View style={styles.infoArea}>
           
           <View style={styles.inlineSwatchRow}>
