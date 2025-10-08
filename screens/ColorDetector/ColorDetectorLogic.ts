@@ -137,3 +137,15 @@ export function decodeJpegAndSampleAt(base64: string, relX: number, relY: number
     return null;
   }
 }
+
+export async function processWithIndicator(setProcessing: (v:boolean)=>void, fn: ()=>Promise<any>) {
+  try {
+    try { setProcessing(true); } catch (_e) {}
+    // yield to allow React Native to render the processing overlay before heavy work
+  try { await new Promise<void>((resolve) => setTimeout(() => resolve(), 50)); } catch (_e) {}
+    const res = await fn();
+    return res;
+  } finally {
+    try { setProcessing(false); } catch (_e) {}
+  }
+}

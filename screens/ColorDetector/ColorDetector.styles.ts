@@ -65,4 +65,7 @@ export const styles = StyleSheet.create({
   swatchRoot: { position: 'absolute', right: rf(12), top: rf(12), zIndex: 9999, elevation: 20 },
   inlineSwatchRow: { width: '100%', alignItems: 'flex-start', marginBottom: rf(12) },
   swatchBoxLarge: { width: rf(104), height: rf(104), borderRadius: rf(12), borderWidth: 1, borderColor: '#DDD', backgroundColor: '#999' },
+  processingOverlay: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)' },
+  processingBox: { padding: rf(14), borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.95)', alignItems: 'center' },
+  processingText: { fontSize: rf(15), color: '#111', marginTop: rf(8), fontWeight: '600' },
 });

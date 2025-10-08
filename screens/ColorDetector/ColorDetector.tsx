@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, TouchableWithoutFeedback, Platform, PermissionsAndroid, Image, PanResponder, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, TouchableWithoutFeedback, Platform, PermissionsAndroid, Image, PanResponder, Animated, ActivityIndicator } from 'react-native';
 let captureRef: any = null;
 try { captureRef = require('react-native-view-shot').captureRef; } catch (_e) { captureRef = null; }
 import { ICONS } from '../../Images';
 import { styles } from './ColorDetector.styles';
-import { getFallbackColor, getJpegUtils, getJpegOrientation, decodeJpegAndSampleCenter as _decodeCenter, decodeJpegAndSampleAt as _decodeAt, hexToRgb } from './ColorDetectorLogic';
+import { getFallbackColor, getJpegUtils, getJpegOrientation, decodeJpegAndSampleCenter as _decodeCenter, decodeJpegAndSampleAt as _decodeAt, hexToRgb, processWithIndicator } from './ColorDetectorLogic';
 import { findClosestColor } from '../../services/ColorMatcher';
 import { findClosestColorAsync } from '../../services/ColorMatcherWorker';
 import { inferColorFromRGB } from '../../services/ColorDetectorInference';
@@ -51,6 +51,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [adjusting, setAdjusting] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const panResponder = useRef<any>(null);
   const [imageNaturalSize, setImageNaturalSize] = useState<{w:number,h:number} | null>(null);
@@ -398,53 +399,63 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           try { setFreeze(true); freezeRef.current = true; } catch (_e) {}
           frozenImageUriRef.current = null;
 
-          let selectedSample: any = null;
-          try {
-            try { await ensurePreviewMeasured(); } catch (_e) {}
-            const centerX = (previewLayout.current.width || 0) / 2;
-            const centerY = (previewLayout.current.height || 0) / 2;
-            let res: any = null;
-            try { res = await sampleUploadedImageAt(centerX, centerY); } catch (_e) { res = null; }
-            if (res && !(res as any).offImage) {
-              selectedSample = res;
-              setDetected(res);
-              setFrozenSnapshot(res);
-              setFreeze(true);
-            } else {
-              if (uri && (uri as string).startsWith('file://')) {
-                try {
-                  const RNFS = require('react-native-fs');
-                  const base64 = await RNFS.readFile((uri as string).replace('file://',''), 'base64');
-                  if (base64) {
-                    const centerSample = _decodeCenter(base64);
-                    if (centerSample) {
-                      const match = await findClosestColorAsync([centerSample.r, centerSample.g, centerSample.b], 3).catch(() => null);
-                      if (match) {
-                        const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
-                        selectedSample = c;
-                        setDetected(c);
-                        setFrozenSnapshot(c);
-                        setFreeze(true);
+          const doProcessing = async () => {
+            let selectedSample: any = null;
+            try {
+              try { await ensurePreviewMeasured(); } catch (_e) {}
+              const centerX = (previewLayout.current.width || 0) / 2;
+              const centerY = (previewLayout.current.height || 0) / 2;
+              let res: any = null;
+              try { res = await sampleUploadedImageAt(centerX, centerY); } catch (_e) { res = null; }
+              if (res && !(res as any).offImage) {
+                selectedSample = res;
+                setDetected(res);
+                setFrozenSnapshot(res);
+                setFreeze(true);
+              } else {
+                if (uri && (uri as string).startsWith('file://')) {
+                  try {
+                    const RNFS = require('react-native-fs');
+                    const base64 = await RNFS.readFile((uri as string).replace('file://',''), 'base64');
+                    if (base64) {
+                      const centerSample = _decodeCenter(base64);
+                      if (centerSample) {
+                        const match = await findClosestColorAsync([centerSample.r, centerSample.g, centerSample.b], 3).catch(() => null);
+                        if (match) {
+                          const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+                          selectedSample = c;
+                          setDetected(c);
+                          setFrozenSnapshot(c);
+                          setFreeze(true);
+                        }
                       }
                     }
-                  }
-                } catch (_e) {}
-              }
+                  } catch (_e) {}
+                }
 
-              if (!selectedSample) {
-                setDetected(null);
-                setFrozenSnapshot(null);
-                selectedSample = null;
+                if (!selectedSample) {
+                  setDetected(null);
+                  setFrozenSnapshot(null);
+                  selectedSample = null;
+                }
               }
+            } catch (err) {
+              setDetected(null);
+              setFrozenSnapshot(null);
+              selectedSample = null;
             }
-          } catch (err) {
-            setDetected(null);
-            setFrozenSnapshot(null);
-            selectedSample = null;
-          }
 
-          if (voiceEnabled && voiceMode !== 'disable' && selectedSample) {
-            try { const textToSpeak = voiceMode === 'real' ? selectedSample.realName : selectedSample.family; safeSpeak(textToSpeak); } catch (err) {}
+            if (voiceEnabled && voiceMode !== 'disable' && selectedSample) {
+              try { const textToSpeak = voiceMode === 'real' ? selectedSample.realName : selectedSample.family; safeSpeak(textToSpeak); } catch (err) {}
+            }
+          };
+
+          try {
+            // Use the helper so `processing` is toggled while we analyze the uploaded image
+            await processWithIndicator(setProcessing, doProcessing);
+          } catch (_e) {
+            // fallback: run without indicator
+            await doProcessing();
           }
         } catch (innerErr) {
           // ignore
@@ -1036,6 +1047,15 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           )}
         </View>
       </TouchableWithoutFeedback>
+
+        {processing && (
+          <View style={styles.processingOverlay} pointerEvents="box-none">
+            <View style={styles.processingBox}>
+              <ActivityIndicator size="large" color="#6A0DAF" />
+              <Text style={styles.processingText}>Processing image…</Text>
+            </View>
+          </View>
+        )}
 
         <View style={styles.infoArea}>
           
