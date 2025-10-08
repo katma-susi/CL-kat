@@ -116,4 +116,5 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    implementation 'org.tensorflow:tensorflow-lite:2.13.0'
 }

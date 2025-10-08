@@ -7,6 +7,7 @@ import { styles } from './ColorDetector.styles';
 import { getFallbackColor, getJpegUtils, getJpegOrientation, decodeJpegAndSampleCenter as _decodeCenter, decodeJpegAndSampleAt as _decodeAt, hexToRgb } from './ColorDetectorLogic';
 import { findClosestColor } from '../../services/ColorMatcher';
 import { findClosestColorAsync } from '../../services/ColorMatcherWorker';
+import { inferColorFromRGB } from '../../services/ColorDetectorInference';
 import { speak, initTts, stop as stopTts } from '../../utils/tts';
 
 let RNCamera: any = null;
@@ -110,9 +111,9 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
               const cy = ph ? Math.round(ph / 2) : 0;
               const nativeSample = await decodeScaledRegion(normalizedUri, cx, cy, pw, ph);
               if (nativeSample && typeof nativeSample.r === 'number') {
-                const match = await findClosestColorAsync([nativeSample.r, nativeSample.g, nativeSample.b], 3).catch(() => null);
-                if (match) {
-                  const live = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+                const inferred = await inferColorFromRGB({ r: nativeSample.r, g: nativeSample.g, b: nativeSample.b }).catch(() => null);
+                if (inferred) {
+                  const live = { family: inferred.family, hex: inferred.hex, realName: inferred.realName };
                   if (!freeze) setLiveDetected(live);
                   processingFrameRef.current = false;
                   return true;
@@ -146,9 +147,9 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         if (count === 0) { processingFrameRef.current = false; return false; }
         const sampled = { r: Math.round(rSum/count), g: Math.round(gSum/count), b: Math.round(bSum/count) };
         try {
-          const match = await findClosestColorAsync([sampled.r, sampled.g, sampled.b], 3).catch(() => null);
-          if (match) {
-            const live = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+          const inferred = await inferColorFromRGB({ r: sampled.r, g: sampled.g, b: sampled.b }).catch(() => null);
+          if (inferred) {
+            const live = { family: inferred.family, hex: inferred.hex, realName: inferred.realName };
             if (!freeze) setLiveDetected(live);
             processingFrameRef.current = false;
             return true;
@@ -505,8 +506,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           if ((photo as any)?.base64) {
             const sample = _decodeCenter((photo as any).base64);
             if (sample) {
-              const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
-              if (match) return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+              const inferred = await inferColorFromRGB({ r: sample.r, g: sample.g, b: sample.b }).catch(() => null);
+              if (inferred) return { family: inferred.family, hex: inferred.hex, realName: inferred.realName };
             }
           }
         } catch (err) {
@@ -614,8 +615,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                 const base64 = await RNFS.readFile(normalizedUri.replace('file://',''), 'base64');
                 const sample = _decodeAt(base64, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
                 if (sample) {
-                  const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null);
-                  if (match) return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+                  const inferred = await inferColorFromRGB({ r: sample.r, g: sample.g, b: sample.b }).catch(() => null);
+                  if (inferred) return { family: inferred.family, hex: inferred.hex, realName: inferred.realName };
                 }
               } catch (_e2) {
               }
@@ -649,7 +650,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       }
       try {
         const centerSample = await captureAndSampleCenter();
-        if (centerSample) return centerSample;
+  if (centerSample) return centerSample;
       } catch (_e) {
       }
       return null;

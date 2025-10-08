@@ -9,6 +9,7 @@ import com.facebook.react.ReactNativeHost
 import com.facebook.react.ReactPackage
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.colorlensv1.tflite.ColorTFLitePackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -23,6 +24,10 @@ class MainApplication : Application(), ReactApplication {
                 add(ImageDecoderPackage())
               } catch (_: Exception) {
                 // ignore if registration fails on some build setups
+              }
+              try {
+                add(ColorTFLitePackage())
+              } catch (_: Exception) {
               }
             }
 
