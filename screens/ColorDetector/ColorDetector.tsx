@@ -81,6 +81,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
 
   const processSnapshotAndSample = async (): Promise<boolean> => {
     try {
+      if (cameraPermission !== 'authorized') return false;
       if (processingFrameRef.current) return false;
       if (freeze) return false;
       processingFrameRef.current = true;
@@ -221,7 +222,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       };
       probe();
     } catch (_e) {}
-    startDetection();
+  // do not start detection here unconditionally; start when permission is authorized
     return () => {
       stopDetection();
       try {
@@ -249,6 +250,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       } catch (err) {}
     };
     discover();
+    if (cameraPermission === 'authorized') startDetection();
+    else stopDetection();
   }, [cameraPermission]);
 
   useEffect(() => {
