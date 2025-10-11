@@ -1,0 +1,4 @@
+yarn react-native bundle --platform android --dev false --entry-file index.js --bundle-output index.android.bundle --assets-dest android/app/src/main/res
+.\gradlew.bat clean
+.\gradlew.bat :app:assembleDebug
+adb install -r app-debug.apk

@@ -308,12 +308,22 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
               })();
               try {
                 if (voiceEnabled && voiceMode !== 'disable' && liveDetected) {
-                  const textToSpeak = voiceMode === 'real' ? liveDetected.realName : liveDetected.family;
-                  const speakWithLogging = (delayMs: number) => { const tid = setTimeout(() => { try { const maybe = safeSpeak(textToSpeak, { force: true }); Promise.resolve(maybe).catch(() => {}); } catch (err) {} }, delayMs) as unknown as number; try { freezeSpeakTimersRef.current.push(tid); } catch (_e) {} };
-                  speakWithLogging(400); speakWithLogging(900); setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 1000);
-                } else if (voiceEnabled && voiceMode !== 'disable' && !liveDetected) {
-                  (async () => { try { const c = await captureAndSampleCenter(); if (c) { setFrozenSnapshot(c); const textToSpeak = voiceMode === 'real' ? c.realName : c.family; const speakWithLogging2 = (delayMs: number) => { const tid2 = setTimeout(() => { try { const maybe2 = safeSpeak(textToSpeak, { force: true }); Promise.resolve(maybe2).catch(() => {}); } catch (err) {} }, delayMs) as unknown as number; try { freezeSpeakTimersRef.current.push(tid2); } catch (_e) {} }; speakWithLogging2(400); speakWithLogging2(900); setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 1000); } } catch (_e) {} })();
-                }
+                    try { freezeSpeakTimersRef.current.forEach((tid) => { try { clearTimeout(tid as any); } catch (_e) {} }); } catch (_e) {}
+                    freezeSpeakTimersRef.current = [];
+                    const textToSpeak = voiceMode === 'real' ? liveDetected.realName : liveDetected.family;
+                    const tid = setTimeout(() => { try { const maybe = safeSpeak(textToSpeak, { force: true }); Promise.resolve(maybe).catch(() => {}); } catch (err) {} }, 600) as unknown as number;
+                    try { freezeSpeakTimersRef.current.push(tid); } catch (_e) {}
+                    setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 800);
+                  } else if (voiceEnabled && voiceMode !== 'disable' && !liveDetected) {
+                    (async () => { try { const c = await captureAndSampleCenter(); if (c) { setFrozenSnapshot(c);
+                          try { freezeSpeakTimersRef.current.forEach((tid) => { try { clearTimeout(tid as any); } catch (_e) {} }); } catch (_e) {}
+                          freezeSpeakTimersRef.current = [];
+                          const textToSpeak = voiceMode === 'real' ? c.realName : c.family;
+                          const tid2 = setTimeout(() => { try { const maybe2 = safeSpeak(textToSpeak, { force: true }); Promise.resolve(maybe2).catch(() => {}); } catch (err) {} }, 600) as unknown as number;
+                          try { freezeSpeakTimersRef.current.push(tid2); } catch (_e) {}
+                          setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 800);
+                      } } catch (_e) {} })();
+                  }
               } catch (_e) {}
             });
           }
