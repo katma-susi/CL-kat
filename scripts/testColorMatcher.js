@@ -1,5 +1,5 @@
 const Color = require('colorjs.io').default || require('colorjs.io');
-const dataset = require('../colormodel.json');
+const dataset = require('../android/app/src/main/assets/colormodel.json');
 
 function normalizeHex(hex) {
   if (!hex) return '#000000';
