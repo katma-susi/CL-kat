@@ -222,7 +222,6 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       };
       probe();
     } catch (_e) {}
-  // do not start detection here unconditionally; start when permission is authorized
     return () => {
       stopDetection();
       try {
