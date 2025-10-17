@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { View, Text, TouchableOpacity, TouchableWithoutFeedback, Platform, PermissionsAndroid, Image, PanResponder, Animated, ActivityIndicator } from 'react-native';
 let captureRef: any = null;
 try { captureRef = require('react-native-view-shot').captureRef; } catch (_e) { captureRef = null; }
@@ -35,6 +36,7 @@ interface ColorDetectorProps {
 }
 
 const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voiceEnabled=true, colorCodesVisible=true, voiceMode='family', showFamily=true, showRealName=true }) => {
+  const insets = useSafeAreaInsets();
   const [detected, setDetected] = useState<{family:string,hex:string,realName:string} | null>(null);
   const [liveDetected, setLiveDetected] = useState<{family:string,hex:string,realName:string} | null>(null);
   const [frozenSnapshot, setFrozenSnapshot] = useState<{family:string,hex:string,realName:string} | null>(null);
@@ -903,7 +905,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     const displayDetected = freeze ? (frozenSnapshot ?? detected) : liveDetected ?? detected;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top || 0, paddingBottom: insets.bottom || 0 }]}> 
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={{ top: 10, left: 10, bottom: 10, right: 10 }}>
           <Image source={ICONS.ARROWicon} style={styles.backIconImage} />

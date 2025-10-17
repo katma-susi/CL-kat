@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Alert, Switch, ScrollView, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ICONS } from '../../Images';
 import { styles } from './CLSetting.styles';
 
@@ -18,6 +19,7 @@ interface CLSettingProps {
   onToggleShowRealName?: (v:boolean)=>void;
 }
 const CLSetting: React.FC<CLSettingProps> = ({ onBack, colorCodesVisible=true, voiceMode='family', onToggleColorCodes, onNavigateToYT, onChangeVoiceMode, showFamily=true, showRealName=true, onToggleShowFamily, onToggleShowRealName }) => {
+  const insets = useSafeAreaInsets();
   const [localColorCodesVisible, setLocalColorCodesVisible] = useState<boolean>(colorCodesVisible);
   const [localVoiceMode, setLocalVoiceMode] = useState<'family'|'real'|'disable'>(voiceMode);
   const [localShowFamily, setLocalShowFamily] = useState<boolean>(showFamily);
@@ -33,7 +35,7 @@ const CLSetting: React.FC<CLSettingProps> = ({ onBack, colorCodesVisible=true, v
     onBack();
   };
   return (
-    <View style={styles.container}>
+  <View style={[styles.container, { paddingTop: insets.top || 0, paddingBottom: insets.bottom || 0 }]}> 
   <TouchableOpacity onPress={saveAndBack} style={styles.backButton} hitSlop={{ top: 10, left: 10, bottom: 10, right: 10 }}>
     <Image source={ICONS.ARROWicon} style={styles.backIconImage} />
   </TouchableOpacity>
