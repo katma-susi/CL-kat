@@ -3,6 +3,7 @@ yarn react-native bundle --platform android --dev false --entry-file index.js --
 .\gradlew.bat :app:assembleDebug
 adb install -r app-debug.apk
 
+C:\Users\Admin\Desktop\ColorLens\android\app\src\main\assets\index.android.bundle
 //CUT FROM ROOT AND COPY THE index.android.bundle FILE INTO ASSETS FOLDER
 -----------------------------------
 TO TRAIN AGAIN..

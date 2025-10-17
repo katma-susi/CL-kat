@@ -4,7 +4,7 @@ let captureRef: any = null;
 try { captureRef = require('react-native-view-shot').captureRef; } catch (_e) { captureRef = null; }
 import { ICONS } from '../../Images';
 import { styles } from './ColorDetector.styles';
-import { getFallbackColor, getJpegUtils, getJpegOrientation, decodeJpegAndSampleCenter as _decodeCenter, decodeJpegAndSampleAt as _decodeAt, hexToRgb, processWithIndicator } from './ColorDetectorLogic';
+import { getFallbackColor, getJpegUtils, getJpegOrientation, decodeJpegAndSampleCenter as _decodeCenter, decodeJpegAndSampleAt as _decodeAt, hexToRgb, processWithIndicator, mapPressToPreviewCoords, mapLocalPressToPreviewCoords } from './ColorDetectorLogic';
 import { findClosestColor } from '../../services/ColorMatcher';
 import { findClosestColorAsync } from '../../services/ColorMatcherWorker';
 import { inferColorFromRGB } from '../../services/ColorDetectorInference';
@@ -52,6 +52,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   const [adjusting, setAdjusting] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [tapMarker, setTapMarker] = useState<{ x:number, y:number, id:number } | null>(null);
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const panResponder = useRef<any>(null);
   const [imageNaturalSize, setImageNaturalSize] = useState<{w:number,h:number} | null>(null);
@@ -332,53 +333,101 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     }
   };
 
-  const onScreenPress = (e: any) => {
+  const onScreenPress = async (e: any) => {
     if (!freeze) return;
-    const pageX = e.nativeEvent.pageX as number; const pageY = e.nativeEvent.pageY as number;
     try {
-      if (previewRef.current && previewRef.current.measureInWindow) {
-        previewRef.current.measureInWindow((px: number, py: number, pw: number, ph: number) => {
-          previewLayout.current = { x: px, y: py, width: pw, height: ph };
-          const relX = Math.max(0, Math.min(pw, pageX - px)); const relY = Math.max(0, Math.min(ph, pageY - py));
-          try {
-            if (selectedImageUri && imageScaledSize && previewLayout.current) {
-              let panX = 0, panY = 0; try { panX = (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0; } catch (_e) { panX = 0; } try { panY = (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0; } catch (_e) { panY = 0; }
-              const imageLeft = Math.round((pw - imageScaledSize.w) / 2) + panX; const imageTop = Math.round((ph - imageScaledSize.h) / 2) + panY;
-              if (relX < imageLeft || relY < imageTop || relX > imageLeft + imageScaledSize.w || relY > imageTop + imageScaledSize.h) return;
-              try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
-            } else { try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {} }
-          } catch (_e) { try { setCrosshairPos({ x: relX, y: relY }); } catch (_e2) {} }
-          let selectedSample: any = null;
-          const trySampleUploadedImage = async () => { try { if (selectedImageUri) { const res = await sampleUploadedImageAt(relX, relY); if (res) return res; } } catch (_e) {} return null; };
-          trySampleUploadedImage().then(async (uploadedRes:any) => {
-            if (uploadedRes && (uploadedRes as any).offImage) return;
-            if (uploadedRes) { selectedSample = uploadedRes; setDetected(selectedSample); setFrozenSnapshot(selectedSample); }
-            else {
-              if (frozenImageUriRef.current) {
-                try {
-                  const uri = frozenImageUriRef.current;
-                  try {
-                    const { decodeScaledRegion } = require('../../services/ImageDecoder');
-                    const nativeSample = await decodeScaledRegion(uri, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
-                    if (nativeSample) { const match = await findClosestColorAsync([nativeSample.r, nativeSample.g, nativeSample.b], 3).catch(() => null); if (match) { selectedSample = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(selectedSample); setFrozenSnapshot(selectedSample); } }
-                  } catch (_e) {
-                    try { const RNFS = require('react-native-fs'); const base64 = await RNFS.readFile(uri.replace('file://',''), 'base64'); const sample = _decodeAt(base64, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0); if (sample) { const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null); if (match) { selectedSample = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(selectedSample); setFrozenSnapshot(selectedSample); } } } catch (_e2) {}
-                  }
-                } catch (_e) {}
+      const { relX, relY } = await mapPressToPreviewCoords(e, previewRef, previewLayout);
+      try {
+        const markerId = Date.now();
+        setTapMarker({ x: Math.round(relX), y: Math.round(relY), id: markerId });
+        try { setTimeout(() => { try { setTapMarker((cur) => cur && cur.id === markerId ? null : cur); } catch (_e) {} }, 5000); } catch (_e) {}
+      } catch (_e) {}
+      try {
+        if (selectedImageUri && imageScaledSize && previewLayout.current) {
+          let panX = 0, panY = 0; try { panX = (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0; } catch (_e) { panX = 0; } try { panY = (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0; } catch (_e) { panY = 0; }
+          const pw = previewLayout.current.width || 0; const ph = previewLayout.current.height || 0;
+          const imageLeft = Math.round((pw - imageScaledSize.w) / 2) + panX; const imageTop = Math.round((ph - imageScaledSize.h) / 2) + panY;
+          if (relX < imageLeft || relY < imageTop || relX > imageLeft + imageScaledSize.w || relY > imageTop + imageScaledSize.h) return;
+          try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
+        } else { try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {} }
+      } catch (_e) { try { setCrosshairPos({ x: relX, y: relY }); } catch (_e2) {} }
+      let selectedSample: any = null;
+      const trySampleUploadedImage = async () => { try { if (selectedImageUri) { const res = await sampleUploadedImageAt(relX, relY); if (res) return res; } } catch (_e) {} return null; };
+      try {
+        const uploadedRes = await trySampleUploadedImage();
+        if (uploadedRes && (uploadedRes as any).offImage) return;
+        if (uploadedRes) { selectedSample = uploadedRes; setDetected(selectedSample); setFrozenSnapshot(selectedSample); }
+        else {
+          if (frozenImageUriRef.current) {
+            try {
+              const uri = frozenImageUriRef.current;
+              try {
+                const { decodeScaledRegion } = require('../../services/ImageDecoder');
+                const nativeSample = await decodeScaledRegion(uri, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
+                if (nativeSample) { const match = await findClosestColorAsync([nativeSample.r, nativeSample.g, nativeSample.b], 3).catch(() => null); if (match) { selectedSample = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(selectedSample); setFrozenSnapshot(selectedSample); } }
+              } catch (_e) {
+                try { const RNFS = require('react-native-fs'); const base64 = await RNFS.readFile(uri.replace('file://',''), 'base64'); const sample = _decodeAt(base64, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0); if (sample) { const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null); if (match) { selectedSample = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(selectedSample); setFrozenSnapshot(selectedSample); } } } catch (_e2) {}
               }
-              if (!selectedSample) {
-                try { const res:any = await captureAndSampleAt(relX, relY); if (res) { selectedSample = res; setDetected(res); setFrozenSnapshot(res); } else { try { const sampled = getFallbackColor(); const rgb = hexToRgb(sampled.hex); const match = findClosestColor(rgb, 3); const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(c); setFrozenSnapshot(c); selectedSample = c; } catch (err) { const c = getFallbackColor(); setDetected(c); setFrozenSnapshot(c); selectedSample = c; } } } catch (_err) { try { const sampled = getFallbackColor(); const rgb = hexToRgb(sampled.hex); const match = findClosestColor(rgb, 3); const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(c); setFrozenSnapshot(c); selectedSample = c; } catch (err) { const c = getFallbackColor(); setDetected(c); setFrozenSnapshot(c); selectedSample = c; } }
-              }
-            }
-            if (selectedSample) try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
-            if (voiceEnabled && voiceMode !== 'disable' && selectedSample) {
-              try { const textToSpeak = voiceMode === 'real' ? selectedSample.realName : selectedSample.family; try { freezeSpeakTimersRef.current.forEach((tid) => { try { clearTimeout(tid as any); } catch (_e) {} }); } catch (_e) {}; freezeSpeakTimersRef.current = []; try { stopTts(); } catch (_e) {}; const ok = safeSpeak(textToSpeak); lastSpokenRef.current = Date.now(); } catch (err) {}
-            }
-          }).catch((_err:any) => { try { const sampled = getFallbackColor(); setDetected(sampled); setFrozenSnapshot(sampled); if (voiceEnabled && voiceMode !== 'disable') try { safeSpeak(voiceMode === 'real' ? sampled.realName : sampled.family); } catch (_e) {} } catch (_e) {} });
-        });
+            } catch (_e) {}
+          }
+          if (!selectedSample) {
+            try { const res:any = await captureAndSampleAt(relX, relY); if (res) { selectedSample = res; setDetected(res); setFrozenSnapshot(res); } else { try { const sampled = getFallbackColor(); const rgb = hexToRgb(sampled.hex); const match = findClosestColor(rgb, 3); const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(c); setFrozenSnapshot(c); selectedSample = c; } catch (err) { const c = getFallbackColor(); setDetected(c); setFrozenSnapshot(c); selectedSample = c; } } } catch (_err) { try { const sampled = getFallbackColor(); const rgb = hexToRgb(sampled.hex); const match = findClosestColor(rgb, 3); const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(c); setFrozenSnapshot(c); selectedSample = c; } catch (err) { const c = getFallbackColor(); setDetected(c); setFrozenSnapshot(c); selectedSample = c; } }
+          }
+        }
+        if (selectedSample) try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
+        if (voiceEnabled && voiceMode !== 'disable' && selectedSample) {
+          try { const textToSpeak = voiceMode === 'real' ? selectedSample.realName : selectedSample.family; try { freezeSpeakTimersRef.current.forEach((tid) => { try { clearTimeout(tid as any); } catch (_e) {} }); } catch (_e) {}; freezeSpeakTimersRef.current = []; try { stopTts(); } catch (_e) {}; const ok = safeSpeak(textToSpeak); lastSpokenRef.current = Date.now(); } catch (err) {}
+        }
+      } catch (_err) {
+        try { const sampled = getFallbackColor(); setDetected(sampled); setFrozenSnapshot(sampled); if (voiceEnabled && voiceMode !== 'disable') try { safeSpeak(voiceMode === 'real' ? sampled.realName : sampled.family); } catch (_e) {} } catch (_e) {}
       }
     } catch (err) {}
   };
+
+  const handleTapAt = async (relX: number, relY: number) => {
+    try {
+      let selectedSample: any = null;
+      try {
+        if (selectedImageUri && imageScaledSize && previewLayout.current) {
+          let panX = 0, panY = 0; try { panX = (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0; } catch (_e) { panX = 0; } try { panY = (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0; } catch (_e) { panY = 0; }
+          const pw = previewLayout.current.width || 0; const ph = previewLayout.current.height || 0;
+          const imageLeft = Math.round((pw - imageScaledSize.w) / 2) + panX; const imageTop = Math.round((ph - imageScaledSize.h) / 2) + panY;
+          if (relX < imageLeft || relY < imageTop || relX > imageLeft + imageScaledSize.w || relY > imageTop + imageScaledSize.h) return;
+          try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
+        } else { try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {} }
+      } catch (_e) { try { setCrosshairPos({ x: relX, y: relY }); } catch (_e2) {} }
+      const trySampleUploadedImage = async () => { try { if (selectedImageUri) { const res = await sampleUploadedImageAt(relX, relY); if (res) return res; } } catch (_e) {} return null; };
+      try {
+        const uploadedRes = await trySampleUploadedImage();
+        if (uploadedRes && (uploadedRes as any).offImage) return;
+        if (uploadedRes) { selectedSample = uploadedRes; setDetected(selectedSample); setFrozenSnapshot(selectedSample); }
+        else {
+          if (frozenImageUriRef.current) {
+            try {
+              const uri = frozenImageUriRef.current;
+              try {
+                const { decodeScaledRegion } = require('../../services/ImageDecoder');
+                const nativeSample = await decodeScaledRegion(uri, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
+                if (nativeSample) { const match = await findClosestColorAsync([nativeSample.r, nativeSample.g, nativeSample.b], 3).catch(() => null); if (match) { selectedSample = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(selectedSample); setFrozenSnapshot(selectedSample); } }
+              } catch (_e) {
+                try { const RNFS = require('react-native-fs'); const base64 = await RNFS.readFile(uri.replace('file://',''), 'base64'); const sample = _decodeAt(base64, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0); if (sample) { const match = await findClosestColorAsync([sample.r, sample.g, sample.b], 3).catch(() => null); if (match) { selectedSample = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(selectedSample); setFrozenSnapshot(selectedSample); } } } catch (_e2) {}
+              }
+            } catch (_e) {}
+          }
+          if (!selectedSample) {
+            try { const res:any = await captureAndSampleAt(relX, relY); if (res) { selectedSample = res; setDetected(res); setFrozenSnapshot(res); } else { try { const sampled = getFallbackColor(); const rgb = hexToRgb(sampled.hex); const match = findClosestColor(rgb, 3); const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(c); setFrozenSnapshot(c); selectedSample = c; } catch (err) { const c = getFallbackColor(); setDetected(c); setFrozenSnapshot(c); selectedSample = c; } } } catch (_err) { try { const sampled = getFallbackColor(); const rgb = hexToRgb(sampled.hex); const match = findClosestColor(rgb, 3); const c = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name }; setDetected(c); setFrozenSnapshot(c); selectedSample = c; } catch (err) { const c = getFallbackColor(); setDetected(c); setFrozenSnapshot(c); selectedSample = c; } }
+          }
+        }
+        if (selectedSample) try { setCrosshairPos({ x: relX, y: relY }); } catch (_e) {}
+        if (voiceEnabled && voiceMode !== 'disable' && selectedSample) {
+          try { const textToSpeak = voiceMode === 'real' ? selectedSample.realName : selectedSample.family; try { freezeSpeakTimersRef.current.forEach((tid) => { try { clearTimeout(tid as any); } catch (_e) {} }); } catch (_e) {}; freezeSpeakTimersRef.current = []; try { stopTts(); } catch (_e) {}; const ok = safeSpeak(textToSpeak); lastSpokenRef.current = Date.now(); } catch (err) {}
+        }
+      } catch (_err) {
+        try { const sampled = getFallbackColor(); setDetected(sampled); setFrozenSnapshot(sampled); if (voiceEnabled && voiceMode !== 'disable') try { safeSpeak(voiceMode === 'real' ? sampled.realName : sampled.family); } catch (_e) {} } catch (_e) {}
+      }
+    } catch (err) {}
+  };
+
 
   const requestCameraPermission = async () => {
     try {
@@ -461,36 +510,23 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
               try { const textToSpeak = voiceMode === 'real' ? selectedSample.realName : selectedSample.family; safeSpeak(textToSpeak); } catch (err) {}
             }
           };
-
           try {
-            // Use the helper so `processing` is toggled while we analyze the uploaded image
             await processWithIndicator(setProcessing, doProcessing);
           } catch (_e) {
-            // fallback: run without indicator
             await doProcessing();
           }
         } catch (innerErr) {
-          // ignore
         }
-
         try { setTimeout(() => { try { suppressSpeechRef.current = false; } catch (_e) {} }, 300); } catch (_e) {}
       });
     } catch (err) {
-      // ignore outer errors
     }
   };
-
   useEffect(() => { panResponder.current = PanResponder.create({ onStartShouldSetPanResponder: () => adjusting, onMoveShouldSetPanResponder: () => adjusting, onPanResponderGrant: () => { try { pan.setOffset({ x: (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0, y: (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0 }); } catch (_e) {} pan.setValue({ x: 0, y: 0 }); }, onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }), onPanResponderRelease: () => { pan.flattenOffset(); clampPanToBounds(); }, onPanResponderTerminate: () => { pan.flattenOffset(); clampPanToBounds(); } }); }, [adjusting, imageScaledSize, previewSize]);
-
   useEffect(() => { if (!previewSize || !imageNaturalSize) return; const pw = previewSize.width; const ph = previewSize.height; const iw = imageNaturalSize.w; const ih = imageNaturalSize.h; const scale = Math.max(pw / iw, ph / ih); setImageScaledSize({ w: Math.round(iw * scale), h: Math.round(ih * scale) }); pan.setValue({ x: 0, y: 0 }); }, [previewSize, imageNaturalSize]);
 
   const clampPanToBounds = () => { if (!previewSize || !imageScaledSize) return; const maxOffsetX = Math.max(0, (imageScaledSize.w - previewSize.width) / 2); const maxOffsetY = Math.max(0, (imageScaledSize.h - previewSize.height) / 2); const curX = (pan.x as any).__getValue ? (pan.x as any).__getValue() : 0; const curY = (pan.y as any).__getValue ? (pan.y as any).__getValue() : 0; let clampedX = curX; let clampedY = curY; if (curX > maxOffsetX) clampedX = maxOffsetX; if (curX < -maxOffsetX) clampedX = -maxOffsetX; if (curY > maxOffsetY) clampedY = maxOffsetY; if (curY < -maxOffsetY) clampedY = -maxOffsetY; if (clampedX !== curX || clampedY !== curY) { Animated.spring(pan, { toValue: { x: clampedX, y: clampedY }, useNativeDriver: false }).start(); } };
-
   const onAdjustToggle = () => { setAdjusting((v) => { const next = !v; if (!next) setTimeout(() => clampPanToBounds(), 10); return next; }); };
-
-  
-
-
   const captureAndSampleCenter = async (): Promise<any> => {
     const ready = await waitForCameraReady();
     if (!ready) {
@@ -877,14 +913,26 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       </View>
       <TouchableWithoutFeedback onPress={onPreviewTap}>
         <View style={styles.cameraArea}>
-          <View style={styles.previewWrapper}>
+          <View style={styles.previewWrapper} onStartShouldSetResponder={() => true} onResponderRelease={(e) => {
+            try { if (!freeze) return; const mapped = mapLocalPressToPreviewCoords(e, previewLayout); handleTapAt(mapped.relX, mapped.relY); } catch (_e) {}
+          }}>
            {selectedImageUri ? (
-            <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
+            <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={async (e)=>{
                       try {
-                        const { width: pw, height: ph } = e.nativeEvent.layout;
-                        previewLayout.current.width = pw;
-                        previewLayout.current.height = ph;
-                        setPreviewSize({ width: pw, height: ph });
+                        if (previewRef.current && previewRef.current.measureInWindow) {
+                          try {
+                            previewRef.current.measureInWindow((px:number, py:number, pw:number, ph:number) => {
+                              previewLayout.current = { x: px, y: py, width: pw, height: ph };
+                              setPreviewSize({ width: pw, height: ph });
+                            });
+                          } catch (_e) {
+                            const { width: pw, height: ph } = e.nativeEvent.layout;
+                            previewLayout.current.width = pw; previewLayout.current.height = ph; setPreviewSize({ width: pw, height: ph });
+                          }
+                        } else {
+                          const { width: pw, height: ph } = e.nativeEvent.layout;
+                          previewLayout.current.width = pw; previewLayout.current.height = ph; setPreviewSize({ width: pw, height: ph });
+                        }
                       } catch (innerErr) {  }
             }}>
               
@@ -894,27 +942,37 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                    {...(adjusting && panResponder.current ? panResponder.current.panHandlers : {})}
                    pointerEvents={adjusting ? 'auto' : 'none'}
                    style={[styles.animatedImageAbsolute, { left: Math.round((previewSize.width - imageScaledSize.w) / 2), top: Math.round((previewSize.height - imageScaledSize.h) / 2), width: Math.round(imageScaledSize.w), height: Math.round(imageScaledSize.h), transform: [{ translateX: pan.x }, { translateY: pan.y }] }]}
-                 >
-                   <Image source={{ uri: selectedImageUri }} style={[{ width: Math.round(imageScaledSize.w), height: Math.round(imageScaledSize.h) }, styles.selectedImage]} />
+                   >
+                   <Image source={{ uri: selectedImageUri }} style={[{ width: Math.round(imageScaledSize.w), height: Math.round(imageScaledSize.h) }, styles.selectedImage, { resizeMode: 'cover' }]} />
                  </Animated.View>
                ) : (
                  <Animated.View
                    {...(adjusting && panResponder.current ? panResponder.current.panHandlers : {})}
                    pointerEvents={adjusting ? 'auto' : 'none'}
                    style={[styles.animatedFull, { transform: [{ translateX: pan.x }, { translateY: pan.y }] }]}
-                 >
-                   <Image source={{ uri: selectedImageUri }} style={[styles.cameraInner, styles.selectedImage]} />
+                   >
+                   <Image source={{ uri: selectedImageUri }} style={[styles.cameraInner, styles.selectedImage, { resizeMode: 'cover' }]} />
                  </Animated.View>
                )}
 
             </View>
            ) : RNCamera ? (
-             <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
+             <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={async (e)=>{
                        try {
-                         const { width: pw, height: ph } = e.nativeEvent.layout;
-                         previewLayout.current.width = pw;
-                         previewLayout.current.height = ph;
-                         setPreviewSize({ width: pw, height: ph });
+                         if (previewRef.current && previewRef.current.measureInWindow) {
+                           try {
+                             previewRef.current.measureInWindow((px:number, py:number, pw:number, ph:number) => {
+                               previewLayout.current = { x: px, y: py, width: pw, height: ph };
+                               setPreviewSize({ width: pw, height: ph });
+                             });
+                           } catch (_e) {
+                             const { width: pw, height: ph } = e.nativeEvent.layout;
+                             previewLayout.current.width = pw; previewLayout.current.height = ph; setPreviewSize({ width: pw, height: ph });
+                           }
+                         } else {
+                           const { width: pw, height: ph } = e.nativeEvent.layout;
+                           previewLayout.current.width = pw; previewLayout.current.height = ph; setPreviewSize({ width: pw, height: ph });
+                         }
                        } catch (innerErr) {  }
              }}>
                <RNCamera
@@ -922,6 +980,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                  style={styles.cameraInner}
                  type={RNCamera.Constants.Type.back}
                  captureAudio={false}
+                 ratio={'4:3'}
                  captureTarget={RNCamera.constants?.CaptureTarget?.disk || undefined}
                />
              </View>
@@ -939,30 +998,40 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                }
 
                const finalDevice = availableDevice;
-                if (finalDevice) {
-                try {
-                  const CameraComp = VisionCamera.Camera;
-                    return (
-                    <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={(e)=>{
-                       try {
-                         const { width: pw, height: ph } = e.nativeEvent.layout;
-                         previewLayout.current.width = pw;
-                         previewLayout.current.height = ph;
-                         setPreviewSize({ width: pw, height: ph });
-                       } catch (innerErr) {  }
-                     }}>
-                         <CameraComp
-                         ref={cameraRef}
-                         style={styles.cameraInner}
-                         device={finalDevice}
-                         isActive={!freeze || capturing}
-                         photo={true}
-                         {...(frameProcessor ? { frameProcessor, frameProcessorFps: 2 } : {})}
-                       />
-                     </View>
-                   );
-                 } catch (innerErr) {
-                 }
+                 if (finalDevice) {
+                  try {
+                    const CameraComp = VisionCamera.Camera;
+                      return (
+                      <View ref={(el)=>{ previewRef.current = el; }} style={styles.cameraPreviewContainer} onLayout={async (e)=>{
+                         try {
+                           if (previewRef.current && previewRef.current.measureInWindow) {
+                             try {
+                               previewRef.current.measureInWindow((px:number, py:number, pw:number, ph:number) => {
+                                 previewLayout.current = { x: px, y: py, width: pw, height: ph };
+                                 setPreviewSize({ width: pw, height: ph });
+                               });
+                             } catch (_e) {
+                               const { width: pw, height: ph } = e.nativeEvent.layout;
+                               previewLayout.current.width = pw; previewLayout.current.height = ph; setPreviewSize({ width: pw, height: ph });
+                             }
+                           } else {
+                             const { width: pw, height: ph } = e.nativeEvent.layout;
+                             previewLayout.current.width = pw; previewLayout.current.height = ph; setPreviewSize({ width: pw, height: ph });
+                           }
+                         } catch (innerErr) {  }
+                       }}>
+                           <CameraComp
+                           ref={cameraRef}
+                           style={styles.cameraInner}
+                           device={finalDevice}
+                           isActive={!freeze || capturing}
+                           photo={true}
+                           {...(frameProcessor ? { frameProcessor, frameProcessorFps: 2 } : {})}
+                         />
+                       </View>
+                     );
+                   } catch (innerErr) {
+                   }
                }
 
                return (
@@ -970,11 +1039,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                    <Text style={styles.cameraFallbackText}>No camera device detected.
                      On an emulator, enable a virtual camera (AVD settings) or run on a physical device.
                    </Text>
-                   <View style={styles.debugBlock}>
-                     <Text style={styles.debugText}>Debug: VisionCamera loaded: {VisionCamera ? 'yes' : 'no'}</Text>
-                     <Text style={styles.debugText}>cameraPermission: {String(cameraPermission)}</Text>
-                     <Text style={styles.debugText}>availableDevices: {availableDevices ? JSON.stringify(availableDevices.map((d:any)=>({id:d.id,position:d.position}))) : 'null'}</Text>
-                   </View>
+                  
                  </View>
                );
              })()
@@ -1006,6 +1071,12 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                    <View pointerEvents="none" style={[styles.fillerBar, { left: Math.round(centerX) - Math.round((CROSSHAIR_CONTAINER_SIZE * 1.2) / 2), top: Math.round(centerY) - Math.round((CROSSHAIR_THICKNESS + 1) / 2), width: Math.round(CROSSHAIR_CONTAINER_SIZE * 1.2), height: CROSSHAIR_THICKNESS + 1 }]} />
                    <View pointerEvents="none" style={[styles.fillerBar, { left: Math.round(centerX) - Math.round((CROSSHAIR_THICKNESS + 1) / 2), top: Math.round(centerY) - Math.round((CROSSHAIR_CONTAINER_SIZE * 1.2) / 2), width: CROSSHAIR_THICKNESS + 1, height: Math.round(CROSSHAIR_CONTAINER_SIZE * 1.2) }]} />
                  </>
+               )}
+
+               {tapMarker && previewSize && (
+                 <View style={styles.tapMarkerRoot} pointerEvents="none">
+                   <View style={[styles.tapMarkerDot, { left: Math.round(tapMarker.x - (18/2)), top: Math.round(tapMarker.y - (18/2)) }]} />
+                 </View>
                )}
 
                {freeze && crosshairPos ? (

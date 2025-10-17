@@ -141,11 +141,90 @@ export function decodeJpegAndSampleAt(base64: string, relX: number, relY: number
 export async function processWithIndicator(setProcessing: (v:boolean)=>void, fn: ()=>Promise<any>) {
   try {
     try { setProcessing(true); } catch (_e) {}
-    // yield to allow React Native to render the processing overlay before heavy work
   try { await new Promise<void>((resolve) => setTimeout(() => resolve(), 50)); } catch (_e) {}
     const res = await fn();
     return res;
   } finally {
     try { setProcessing(false); } catch (_e) {}
+  }
+}
+
+export async function mapPressToPreviewCoords(e: any, previewRef: any, previewLayoutRef: { current: { x:number,y:number,width:number,height:number } }) {
+  const pageX = (e && e.nativeEvent && typeof e.nativeEvent.pageX === 'number') ? e.nativeEvent.pageX : (e && typeof e.pageX === 'number' ? e.pageX : 0);
+  const pageY = (e && e.nativeEvent && typeof e.nativeEvent.pageY === 'number') ? e.nativeEvent.pageY : (e && typeof e.pageY === 'number' ? e.pageY : 0);
+  const locX = (e && e.nativeEvent && typeof e.nativeEvent.locationX === 'number') ? e.nativeEvent.locationX : undefined;
+  const locY = (e && e.nativeEvent && typeof e.nativeEvent.locationY === 'number') ? e.nativeEvent.locationY : undefined;
+  let px = previewLayoutRef.current?.x || 0;
+  let py = previewLayoutRef.current?.y || 0;
+  let pw = previewLayoutRef.current?.width || 0;
+  let ph = previewLayoutRef.current?.height || 0;
+  try {
+    if (previewRef && previewRef.current && typeof previewRef.current.measureInWindow === 'function') {
+      await new Promise<void>((resolve) => {
+        try {
+          previewRef.current.measureInWindow((mx: number, my: number, mw: number, mh: number) => {
+            if (typeof mx === 'number' && typeof my === 'number' && typeof mw === 'number' && typeof mh === 'number') {
+              previewLayoutRef.current = { x: mx, y: my, width: mw, height: mh };
+              px = mx; py = my; pw = mw; ph = mh;
+            }
+            resolve();
+          });
+        } catch (_e) { resolve(); }
+      });
+    }
+  } catch (_e) {}
+  let relX = (typeof pageX === 'number') ? Math.max(0, Math.min(pw, pageX - px)) : NaN;
+  let relY = (typeof pageY === 'number') ? Math.max(0, Math.min(ph, pageY - py)) : NaN;
+  const outsideThreshold = 10;
+  const isOutside = isNaN(relX) || isNaN(relY) || relX < -outsideThreshold || relY < -outsideThreshold || relX > pw + outsideThreshold || relY > ph + outsideThreshold;
+  if (isOutside && typeof locX === 'number' && typeof locY === 'number') {
+    relX = Math.max(0, Math.min(pw, locX));
+    relY = Math.max(0, Math.min(ph, locY));
+  }
+  if (isNaN(relX) || isNaN(relY)) { relX = 0; relY = 0; }
+  try {
+    const key = (previewLayoutRef && previewLayoutRef.current) ? `${Math.round(previewLayoutRef.current.width)}x${Math.round(previewLayoutRef.current.height)}` : 'default';
+    const globalAny: any = globalThis as any;
+    if (!globalAny.__clTapCorrection) globalAny.__clTapCorrection = {};
+    if (!globalAny.__clTapCorrection[key]) globalAny.__clTapCorrection[key] = { dx: 0, dy: 0, count: 0 };
+    const entry = globalAny.__clTapCorrection[key];
+    const appliedDx = Math.max(-40, Math.min(40, Math.round(entry.dx)));
+    const appliedDy = Math.max(-40, Math.min(40, Math.round(entry.dy)));
+    const correctedX = Math.max(0, Math.min(pw, relX + appliedDx));
+    const correctedY = Math.max(0, Math.min(ph, relY + appliedDy));
+    try {
+      const observedDx = (typeof locX === 'number' && !isOutside) ? (pageX - px - locX) : (pageX - px - relX);
+      const observedDy = (typeof locY === 'number' && !isOutside) ? (pageY - py - locY) : (pageY - py - relY);
+      if (Math.abs(observedDx) < 200 && Math.abs(observedDy) < 200) {
+        const alpha = 0.08;
+        entry.dx = entry.dx * (1 - alpha) + observedDx * alpha;
+        entry.dy = entry.dy * (1 - alpha) + observedDy * alpha;
+        entry.count = (entry.count || 0) + 1;
+      }
+    } catch (_e) {}
+    return { relX: Math.round(correctedX), relY: Math.round(correctedY) };
+  } catch (_e) { return { relX: Math.round(relX), relY: Math.round(relY) }; }
+}
+
+export function mapLocalPressToPreviewCoords(e: any, previewLayoutRef: { current: { x:number,y:number,width:number,height:number } }) {
+  try {
+    const locX = e && e.nativeEvent && typeof e.nativeEvent.locationX === 'number' ? e.nativeEvent.locationX : 0;
+    const locY = e && e.nativeEvent && typeof e.nativeEvent.locationY === 'number' ? e.nativeEvent.locationY : 0;
+    const pw = previewLayoutRef.current?.width || 0;
+    const ph = previewLayoutRef.current?.height || 0;
+    let relX = Math.max(0, Math.min(pw, locX));
+    let relY = Math.max(0, Math.min(ph, locY));
+    const key = (previewLayoutRef && previewLayoutRef.current) ? `${Math.round(previewLayoutRef.current.width)}x${Math.round(previewLayoutRef.current.height)}` : 'default';
+    const globalAny: any = globalThis as any;
+    if (!globalAny.__clTapCorrection) globalAny.__clTapCorrection = {};
+    if (!globalAny.__clTapCorrection[key]) globalAny.__clTapCorrection[key] = { dx: 0, dy: 0, count: 0 };
+    const entry = globalAny.__clTapCorrection[key];
+    const appliedDx = Math.max(-40, Math.min(40, Math.round(entry.dx)));
+    const appliedDy = Math.max(-40, Math.min(40, Math.round(entry.dy)));
+    const correctedX = Math.max(0, Math.min(pw, relX + appliedDx));
+    const correctedY = Math.max(0, Math.min(ph, relY + appliedDy));
+    return { relX: Math.round(correctedX), relY: Math.round(correctedY) };
+  } catch (_e) {
+    return { relX: 0, relY: 0 };
   }
 }

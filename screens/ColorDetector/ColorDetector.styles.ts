@@ -68,4 +68,6 @@ export const styles = StyleSheet.create({
   processingOverlay: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)' },
   processingBox: { padding: rf(14), borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.95)', alignItems: 'center' },
   processingText: { fontSize: rf(15), color: '#111', marginTop: rf(8), fontWeight: '600' },
+  tapMarkerRoot: { position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none' },
+  tapMarkerDot: { position: 'absolute', width: rf(18), height: rf(18), borderRadius: rf(9), backgroundColor: 'rgba(0,200,80,0.95)', borderWidth: 2, borderColor: '#fff', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },
 });

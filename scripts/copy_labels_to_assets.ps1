@@ -1,4 +1,4 @@
-$src = Join-Path $PSScriptRoot "..\python_ai\output_test\labels.json"
+$src = Join-Path $PSScriptRoot "..\python_ai\output\labels.json"
 $dstDir = Join-Path $PSScriptRoot "..\android\app\src\main\assets"
 if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
 Copy-Item -Path $src -Destination (Join-Path $dstDir "labels.json") -Force
