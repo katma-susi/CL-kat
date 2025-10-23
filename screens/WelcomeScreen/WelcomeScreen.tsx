@@ -82,7 +82,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onNext }) => {
                 { marginTop: 10, fontSize: scaled.descSize, lineHeight: scaled.descLineHeight },
               ]}
             >
-              Perfect for people with color vision differences and useful for designers, educators, and curious learners.
+              Perfect for people with color vision difficiency.
             </Text>
 
             <Text

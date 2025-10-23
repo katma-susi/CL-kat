@@ -15,14 +15,17 @@ class ColorTFLiteHelper(private val context: Context) {
 
     @Throws(IOException::class)
     fun loadModel(modelPath: String = "color_model.tflite") {
-        val fileDescriptor = context.assets.openFd(modelPath)
-        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        val startOffset = fileDescriptor.startOffset
-        val declaredLength = fileDescriptor.declaredLength
-        val mappedBuffer: MappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
-        interpreter = Interpreter(mappedBuffer)
-    }
+    println("ColorTFLiteHelper: Loading model from assets: $modelPath")
+    val fileDescriptor = context.assets.openFd(modelPath)
+    println("ColorTFLiteHelper: File descriptor obtained, size: ${fileDescriptor.declaredLength}")
+    val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
+    val fileChannel = inputStream.channel
+    val startOffset = fileDescriptor.startOffset
+    val declaredLength = fileDescriptor.declaredLength
+    val mappedBuffer: MappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+    interpreter = Interpreter(mappedBuffer)
+    println("ColorTFLiteHelper: TensorFlow Lite interpreter created successfully!")
+}
 
     fun close() {
         interpreter?.close()

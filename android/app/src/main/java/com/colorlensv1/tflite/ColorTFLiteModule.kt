@@ -19,40 +19,47 @@ class ColorTFLiteModule(reactContext: ReactApplicationContext) : ReactContextBas
     @ReactMethod
     fun loadModel(callback: Callback) {
         try {
-            helper.loadModel()
-            labelCount = helper.getLabelCount()
-            callback.invoke(null, true)
-        } catch (e: Exception) {
-            callback.invoke(e.message, null)
-        }
+        println("ColorTFLite: Starting to load color_model.tflite...")
+        helper.loadModel()
+        labelCount = helper.getLabelCount()
+        println("ColorTFLite: Model loaded successfully! Label count: $labelCount")
+        callback.invoke(null, true)
+    } catch (e: Exception) {
+        println("ColorTFLite: Failed to load model - ${e.message}")
+        callback.invoke(e.message, null)
     }
+}
 
     @ReactMethod
     fun predict(l: Double, a: Double, b: Double, callback: Callback) {
-        val interp = helper.interpreter ?: run {
-            callback.invoke("model_not_loaded", null)
-            return
-        }
-        val input = arrayOf(floatArrayOf(l.toFloat(), a.toFloat(), b.toFloat()))
-        val outSize = if (labelCount > 0) labelCount else 12
-        val output = Array(1) { FloatArray(outSize) }
-        interp.run(input, output)
-
-        val probs = output[0]
-        var maxIdx = 0
-        var maxVal = probs[0]
-        for (i in probs.indices) {
-            if (probs[i] > maxVal) {
-                maxVal = probs[i]
-                maxIdx = i
-            }
-        }
-
-        val result: WritableMap = Arguments.createMap()
-        result.putInt("index", maxIdx)
-        result.putDouble("score", maxVal.toDouble())
-        callback.invoke(null, result)
+    println("ColorTFLite: Prediction called with L=$l, A=$a, B=$b")
+    val interp = helper.interpreter ?: run {
+        println("ColorTFLite: Model not loaded, falling back to fallback method")
+        callback.invoke("model_not_loaded", null)
+        return
     }
+    println("ColorTFLite: Using TensorFlow Lite model for prediction")
+    val input = arrayOf(floatArrayOf(l.toFloat(), a.toFloat(), b.toFloat()))
+    val outSize = if (labelCount > 0) labelCount else 12
+    val output = Array(1) { FloatArray(outSize) }
+    interp.run(input, output)
+
+    val probs = output[0]
+    var maxIdx = 0
+    var maxVal = probs[0]
+    for (i in probs.indices) {
+        if (probs[i] > maxVal) {
+            maxVal = probs[i]
+            maxIdx = i
+        }
+    }
+
+    println("ColorTFLite: Prediction result - Index: $maxIdx, Score: $maxVal")
+    val result: WritableMap = Arguments.createMap()
+    result.putInt("index", maxIdx)
+    result.putDouble("score", maxVal.toDouble())
+    callback.invoke(null, result)
+}
 
     @ReactMethod
     fun close(callback: Callback) {
