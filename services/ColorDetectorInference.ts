@@ -82,11 +82,15 @@ export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }
       const labels = require('../android/app/src/main/assets/labels.json') as string[];
       const label = labels[idx] || '';
       const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
-      return { family: label || (match.closest_match.family || match.closest_match.name), hex: match.closest_match.hex, realName: match.closest_match.name, score };
+      const datasetFamily = (match.closest_match.family || '').trim();
+      const chosenFamily = datasetFamily || label || match.closest_match.name;
+      return { family: chosenFamily, hex: match.closest_match.hex, realName: match.closest_match.name, score };
     }
     
     const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
-    return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name, score };
+    const datasetFamily = (match.closest_match.family || '').trim();
+    const fallbackFamily = datasetFamily || match.closest_match.name;
+    return { family: fallbackFamily, hex: match.closest_match.hex, realName: match.closest_match.name, score };
   } catch (e) {
     console.log("ColorDetectorInference: Error during inference:", e);
     try { const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3); return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name } } catch (_e2) { return null }

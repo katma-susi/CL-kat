@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { View, Text, TouchableOpacity, TouchableWithoutFeedback, Platform, PermissionsAndroid, Image, PanResponder, Animated, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, TouchableWithoutFeedback, Platform, PermissionsAndroid, Image, PanResponder, Animated, ActivityIndicator, Alert, BackHandler } from 'react-native';
+let RNExitApp: any = null;
+try {
+  const maybe = require('react-native-exit-app');
+  RNExitApp = maybe?.default ?? maybe;
+} catch (_e) {
+  RNExitApp = null;
+}
 let captureRef: any = null;
 try { captureRef = require('react-native-view-shot').captureRef; } catch (_e) { captureRef = null; }
 import { ICONS } from '../../Images';
@@ -67,6 +74,8 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   const [cameraPermission, setCameraPermission] = useState<string | null>(null);
   const [availableDevices, setAvailableDevices] = useState<any[] | null>(null);
   const availableDevice = availableDevices ? availableDevices.find((d:any) => d.position === 'back') ?? availableDevices[0] : null;
+  const permissionInitializedRef = useRef(false);
+  const exitAppPendingRef = useRef(false);
 
   const processingFrameRef = useRef(false);
 
@@ -81,6 +90,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   };
 
   useEffect(() => { try { initTts(); } catch (_e) {} }, []);
+  useEffect(() => { exitAppPendingRef.current = false; }, []);
 
   const processSnapshotAndSample = async (): Promise<boolean> => {
     try {
@@ -217,6 +227,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           } else setCameraPermission(null);
         }
       } catch (err) { setCameraPermission(null); }
+      permissionInitializedRef.current = true;
     };
     checkPermission();
     try {
@@ -431,16 +442,95 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   };
 
 
+  const forceExitApp = () => {
+    try {
+      if (RNExitApp && typeof RNExitApp.exitApp === 'function') {
+        RNExitApp.exitApp();
+        return;
+      }
+    } catch (_e) {}
+    try { BackHandler.exitApp(); } catch (_e2) {}
+    setTimeout(() => {
+      try { BackHandler.exitApp(); } catch (_e3) {}
+    }, 120);
+    setTimeout(() => {
+      try { BackHandler.exitApp(); } catch (_e4) {}
+    }, 300);
+  };
+
+  const showPermissionReminderAlert = () => {
+    exitAppPendingRef.current = true;
+    Alert.alert(
+      'Camera Permission Required',
+      'ColorLens needs camera permission to enable live color detection.',
+      [
+        {
+          text: 'OK',
+          onPress: () => { forceExitApp(); },
+        },
+      ],
+      { cancelable: false },
+    );
+  };
+
+  const showPermissionBlockedAlert = () => {
+    Alert.alert(
+      'Camera Permission Disabled',
+      'Camera access has been disabled for ColorLens. Please enable it from system settings and try again.',
+      [
+        { text: 'OK', style: 'default' },
+      ],
+      { cancelable: false },
+    );
+  };
+
   const requestCameraPermission = async () => {
     try {
       if (Platform.OS === 'android') {
-        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA, { title: 'Camera Permission', message: 'ColorLens needs access to your camera to detect colors in real time.', buttonNeutral: 'Ask Me Later', buttonNegative: 'Cancel', buttonPositive: 'OK' });
-        setCameraPermission(granted === PermissionsAndroid.RESULTS.GRANTED ? 'authorized' : 'denied'); return;
+        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          setCameraPermission('authorized');
+          return;
+        }
+        if (granted === PermissionsAndroid.RESULTS.DENIED) {
+          setCameraPermission('denied');
+          showPermissionReminderAlert();
+          return;
+        }
+        if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+          setCameraPermission('blocked');
+          showPermissionBlockedAlert();
+          return;
+        }
+        setCameraPermission('denied');
+        return;
       }
       if (!VisionCamera) return;
-      if (VisionCamera.requestCameraPermission) { const res = await VisionCamera.requestCameraPermission(); setCameraPermission(res); }
-      else if (VisionCamera.Camera && VisionCamera.Camera.requestCameraPermission) { const res = await VisionCamera.Camera.requestCameraPermission(); setCameraPermission(res); }
-      else if (VisionCamera.requestPermissions) { const res = await VisionCamera.requestPermissions(); setCameraPermission(res?.camera ?? 'denied'); }
+      const handleVisionResult = (res: any) => {
+        if (res === 'authorized' || res === 'granted') { setCameraPermission('authorized'); return true; }
+        if (res === 'denied') { setCameraPermission('denied'); showPermissionReminderAlert(); return true; }
+        if (res === 'blocked' || res === 'restricted') { setCameraPermission('blocked'); showPermissionBlockedAlert(); return true; }
+        return false;
+      };
+      if (VisionCamera.requestCameraPermission) {
+        const res = await VisionCamera.requestCameraPermission();
+        if (handleVisionResult(res)) return;
+        setCameraPermission(res ?? 'denied');
+        return;
+      }
+      if (VisionCamera.Camera && VisionCamera.Camera.requestCameraPermission) {
+        const res = await VisionCamera.Camera.requestCameraPermission();
+        if (handleVisionResult(res)) return;
+        setCameraPermission(res ?? 'denied');
+        return;
+      }
+      if (VisionCamera.requestPermissions) {
+        const res = await VisionCamera.requestPermissions();
+        const cam = res?.camera ?? 'denied';
+        if (handleVisionResult(cam)) return;
+        setCameraPermission(cam);
+        return;
+      }
     } catch (err) {}
   };
 
