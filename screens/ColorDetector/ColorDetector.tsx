@@ -767,7 +767,7 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                 const sample = _decodeAt(base64, relX, relY, previewLayout.current.width || 0, previewLayout.current.height || 0);
                 if (sample) {
                   const inferred = await inferColorFromRGB({ r: sample.r, g: sample.g, b: sample.b }).catch(() => null);
-                  if (inferred) return { family: inferred.family, hex: inferred.hex, realName: inferred.realName };
+                  if (inferred) return { family: inferred.family, hex: inferred.hex, realName: inferred.realName, confidence: inferred.confidence };
                 }
               } catch (_e2) {
               }

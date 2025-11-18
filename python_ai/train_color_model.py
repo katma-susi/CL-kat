@@ -12,9 +12,9 @@ COLORMODEL = BASE.parent.joinpath('colormodel.json')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--label_field', choices=['family','name'], default='family')
-parser.add_argument('--samples_per_class', type=int, default=1000)
-parser.add_argument('--sigma', nargs=3, type=float, default=[1.5,3.0,3.0])
-parser.add_argument('--epochs', type=int, default=100)
+parser.add_argument('--samples_per_class', type=int, default=3000)  # Increased from 1000
+parser.add_argument('--sigma', nargs=3, type=float, default=[1.0,2.0,2.0])  # Reduced sigma for tighter clustering
+parser.add_argument('--epochs', type=int, default=150)  # Increased from 100
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--quantize', action='store_true')
 parser.add_argument('--output_dir', default=str(BASE.joinpath('output')))
@@ -45,10 +45,12 @@ sigma = np.array(args.sigma, dtype=np.float32)
 X_list = []
 y_list = []
 for lab_vec, lab_name in zip(labs, labels):
-    noise = np.random.normal(0.0, sigma, size=(N, 3)).astype(np.float32)
-    samples = lab_vec + noise
-    X_list.append(samples)
-    y_list.extend([lab_name] * N)
+    # Enhanced augmentation: use multiple sigma levels
+    for sigma_level in [sigma * 0.8, sigma, sigma * 1.2]:
+        noise = np.random.normal(0.0, sigma_level, size=(N // 3, 3)).astype(np.float32)
+        samples = lab_vec + noise
+        X_list.append(samples)
+        y_list.extend([lab_name] * (N // 3))
 
 X = np.vstack(X_list).astype(np.float32)
 y = np.array(y_list)
@@ -65,9 +67,9 @@ X_scaled[:,2] = X[:,2] / 128.0
 num_classes = y_cat.shape[1]
 model = tf.keras.Sequential([
     tf.keras.layers.Input(shape=(3,)),
-    tf.keras.layers.Dense(64, activation='relu'),
+    tf.keras.layers.Dense(128, activation='relu'),  # Increased from 64
     tf.keras.layers.BatchNormalization(),
-    tf.keras.layers.Dropout(0.3),
+    tf.keras.layers.Dropout(0.4),  # Increased from 0.3
     tf.keras.layers.Dense(64, activation='relu'),
     tf.keras.layers.BatchNormalization(),
     tf.keras.layers.Dropout(0.3),
@@ -75,7 +77,17 @@ model = tf.keras.Sequential([
     tf.keras.layers.Dropout(0.2),
     tf.keras.layers.Dense(num_classes, activation='softmax')
 ])
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Add learning rate scheduling
+lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate=0.001,
+    decay_steps=10000,
+    decay_rate=0.96,
+    staircase=True
+)
+optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+
+model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
 
 model.fit(X_scaled, y_cat, epochs=args.epochs, batch_size=args.batch_size, validation_split=0.2, verbose=1)
 
@@ -108,3 +120,4 @@ except Exception as e:
 print('saved', str(model_path))
 print('saved', str(labels_out))
 print('saved', str(out_dir.joinpath('color_model.tflite')))
+

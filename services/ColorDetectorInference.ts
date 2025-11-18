@@ -19,7 +19,7 @@ function scaleLabForModel(l: number, a: number, b: number) {
   return { l: l / 100.0, a: a / 128.0, b: b / 128.0 }
 }
 
-export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }, confidenceThreshold = 0.6): Promise<InferenceResult | null> {
+export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }, confidenceThreshold = 0.65): Promise<InferenceResult | null> {
   try {
     console.log("ColorDetectorInference: Starting color inference for RGB:", rgb);
     const loaded = await ensureModelLoaded();
@@ -40,7 +40,7 @@ export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }
       detected = new Color('srgb', [sr, sg, sb]).to('lab');
     } catch (colorError) {
       console.log("ColorDetectorInference: Color.js failed, using manual RGB to LAB conversion");
-      // cgit commit -m "first commit"Manual RGB to LAB conversion as fallback
+      //first git commit -m "first commit"Manual RGB to LAB conversion as fallback
       const r = sr > 0.04045 ? Math.pow((sr + 0.055) / 1.055, 2.4) : sr / 12.92;
       const g = sg > 0.04045 ? Math.pow((sg + 0.055) / 1.055, 2.4) : sg / 12.92;
       const b = sb > 0.04045 ? Math.pow((sb + 0.055) / 1.055, 2.4) : sb / 12.92;
@@ -79,20 +79,28 @@ export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }
     const idx = res.index;
     console.log("ColorDetectorInference: Final prediction - Index:", idx, "Score:", score, "Threshold:", confidenceThreshold);
     
+    // Two-stage detection: Model + Delta E validation (ColorBlindPal approach)
+    const matcherResult = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
+    const matcherConfidence = matcherResult.closest_match.confidence || 50;
+    
     if (score >= confidenceThreshold) {
       const labels = require('../android/app/src/main/assets/labels.json') as string[];
       const label = labels[idx] || '';
-      const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
-      const datasetFamily = (match.closest_match.family || '').trim();
-      const chosenFamily = datasetFamily || label || match.closest_match.name;
-      return { family: chosenFamily, hex: match.closest_match.hex, realName: match.closest_match.name, score, confidence: confidenceFromModel };
+      const datasetFamily = (matcherResult.closest_match.family || '').trim();
+      const chosenFamily = datasetFamily || label || matcherResult.closest_match.name;
+      
+      // Use the average of model confidence and matcher confidence for more robust results
+      const blendedConfidence = Math.round((confidenceFromModel + matcherConfidence) / 2);
+      console.log("ColorDetectorInference: Model accepted - blending model conf:", confidenceFromModel, "with matcher conf:", matcherConfidence, "= ", blendedConfidence);
+      
+      return { family: chosenFamily, hex: matcherResult.closest_match.hex, realName: matcherResult.closest_match.name, score, confidence: blendedConfidence };
     }
     
-    const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
-    const datasetFamily = (match.closest_match.family || '').trim();
-    const fallbackFamily = datasetFamily || match.closest_match.name;
+    const datasetFamily = (matcherResult.closest_match.family || '').trim();
+    const fallbackFamily = datasetFamily || matcherResult.closest_match.name;
+    console.log("ColorDetectorInference: Model rejected, using matcher fallback with confidence:", matcherConfidence);
     // Use matcher confidence for fallback
-    return { family: fallbackFamily, hex: match.closest_match.hex, realName: match.closest_match.name, score, confidence: match.closest_match.confidence };
+    return { family: fallbackFamily, hex: matcherResult.closest_match.hex, realName: matcherResult.closest_match.name, score, confidence: matcherConfidence };
   } catch (e) {
     console.log("ColorDetectorInference: Error during inference:", e);
     try { const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3); return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name, confidence: match.closest_match.confidence } } catch (_e2) { return null }
