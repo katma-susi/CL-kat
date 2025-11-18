@@ -40,7 +40,7 @@ export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }
       detected = new Color('srgb', [sr, sg, sb]).to('lab');
     } catch (colorError) {
       console.log("ColorDetectorInference: Color.js failed, using manual RGB to LAB conversion");
-      // Manual RGB to LAB conversion as fallback
+      // cgit commit -m "first commit"Manual RGB to LAB conversion as fallback
       const r = sr > 0.04045 ? Math.pow((sr + 0.055) / 1.055, 2.4) : sr / 12.92;
       const g = sg > 0.04045 ? Math.pow((sg + 0.055) / 1.055, 2.4) : sg / 12.92;
       const b = sb > 0.04045 ? Math.pow((sb + 0.055) / 1.055, 2.4) : sb / 12.92;
