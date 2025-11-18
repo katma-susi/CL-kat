@@ -12,10 +12,10 @@ COLORMODEL = BASE.parent.joinpath('colormodel.json')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--label_field', choices=['family','name'], default='family')
-parser.add_argument('--samples_per_class', type=int, default=300)
-parser.add_argument('--sigma', nargs=3, type=float, default=[2.0,4.0,4.0])
-parser.add_argument('--epochs', type=int, default=40)
-parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--samples_per_class', type=int, default=1000)
+parser.add_argument('--sigma', nargs=3, type=float, default=[1.5,3.0,3.0])
+parser.add_argument('--epochs', type=int, default=100)
+parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--quantize', action='store_true')
 parser.add_argument('--output_dir', default=str(BASE.joinpath('output')))
 args = parser.parse_args()
@@ -65,13 +65,19 @@ X_scaled[:,2] = X[:,2] / 128.0
 num_classes = y_cat.shape[1]
 model = tf.keras.Sequential([
     tf.keras.layers.Input(shape=(3,)),
+    tf.keras.layers.Dense(64, activation='relu'),
+    tf.keras.layers.BatchNormalization(),
+    tf.keras.layers.Dropout(0.3),
+    tf.keras.layers.Dense(64, activation='relu'),
+    tf.keras.layers.BatchNormalization(),
+    tf.keras.layers.Dropout(0.3),
     tf.keras.layers.Dense(32, activation='relu'),
-    tf.keras.layers.Dense(32, activation='relu'),
+    tf.keras.layers.Dropout(0.2),
     tf.keras.layers.Dense(num_classes, activation='softmax')
 ])
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
-model.fit(X_scaled, y_cat, epochs=args.epochs, batch_size=args.batch_size, validation_split=0.1)
+model.fit(X_scaled, y_cat, epochs=args.epochs, batch_size=args.batch_size, validation_split=0.2, verbose=1)
 
 model_path = out_dir.joinpath('color_model.h5')
 model.save(str(model_path))

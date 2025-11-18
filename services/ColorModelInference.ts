@@ -21,7 +21,7 @@ export function scaleLabForModel(lab: [number, number, number]): number[] {
   return [lab[0] / 100.0, lab[1] / 128.0, lab[2] / 128.0];
 }
 
-export async function predictLab(model: tf.LayersModel, lab: [number, number, number]): Promise<{index:number,score:number,probs:number[]}> {
+export async function predictLab(model: tf.LayersModel, lab: [number, number, number]): Promise<{index:number,score:number,confidence:number,probs:number[]}> {
   const scaled = scaleLabForModel(lab);
   const input = tf.tensor2d([scaled], [1, 3], 'float32');
   const out = model.predict(input) as tf.Tensor;
@@ -30,7 +30,8 @@ export async function predictLab(model: tf.LayersModel, lab: [number, number, nu
   out.dispose();
   let maxIdx = 0;
   for (let i = 1; i < data.length; i++) if (data[i] > data[maxIdx]) maxIdx = i;
-  return { index: maxIdx, score: Number(data[maxIdx]), probs: Array.from(data) };
+  const confidence = Number((data[maxIdx] * 100).toFixed(2));
+  return { index: maxIdx, score: Number(data[maxIdx]), confidence: confidence, probs: Array.from(data) };
 }
 
 export function mapIndexToLabel(labels: string[], idx: number): string | null {

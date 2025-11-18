@@ -1,7 +1,7 @@
 import ColorTFLite from './ColorTFLiteNative'
 import { findClosestColor } from './ColorMatcher'
 
-export type InferenceResult = { family: string; hex: string; realName: string; score?: number }
+export type InferenceResult = { family: string; hex: string; realName: string; score?: number; confidence?: number }
 
 async function ensureModelLoaded() {
   try {
@@ -30,7 +30,7 @@ export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }
     if (!loaded) {
       console.log("ColorDetectorInference: Model not loaded, using fallback ColorMatcher");
       const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
-      return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+      return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name, confidence: match.closest_match.confidence };
     }
 
     console.log("ColorDetectorInference: Using TensorFlow Lite model for inference");
@@ -71,10 +71,11 @@ export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }
     if (!res) {
       console.log("ColorDetectorInference: TensorFlow Lite prediction failed, using fallback");
       const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
-      return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name };
+      return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name, confidence: match.closest_match.confidence };
     }
     
     const score = res.score ?? 0;
+    const confidenceFromModel = Number((score * 100).toFixed(2));
     const idx = res.index;
     console.log("ColorDetectorInference: Final prediction - Index:", idx, "Score:", score, "Threshold:", confidenceThreshold);
     
@@ -84,16 +85,17 @@ export async function inferColorFromRGB(rgb: { r: number; g: number; b: number }
       const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
       const datasetFamily = (match.closest_match.family || '').trim();
       const chosenFamily = datasetFamily || label || match.closest_match.name;
-      return { family: chosenFamily, hex: match.closest_match.hex, realName: match.closest_match.name, score };
+      return { family: chosenFamily, hex: match.closest_match.hex, realName: match.closest_match.name, score, confidence: confidenceFromModel };
     }
     
     const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3);
     const datasetFamily = (match.closest_match.family || '').trim();
     const fallbackFamily = datasetFamily || match.closest_match.name;
-    return { family: fallbackFamily, hex: match.closest_match.hex, realName: match.closest_match.name, score };
+    // Use matcher confidence for fallback
+    return { family: fallbackFamily, hex: match.closest_match.hex, realName: match.closest_match.name, score, confidence: match.closest_match.confidence };
   } catch (e) {
     console.log("ColorDetectorInference: Error during inference:", e);
-    try { const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3); return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name } } catch (_e2) { return null }
+    try { const match = findClosestColor([rgb.r, rgb.g, rgb.b], 3); return { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name, confidence: match.closest_match.confidence } } catch (_e2) { return null }
   }
 }
 

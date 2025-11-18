@@ -16,12 +16,14 @@ export type MatchResult = {
     hex: string;
     family?: string;
     deltaE: number;
+    confidence?: number;
   };
   alternatives: Array<{
     name: string;
     hex: string;
     family?: string;
     deltaE: number;
+    confidence?: number;
   }>;
 };
 
@@ -85,11 +87,17 @@ export function findClosestColor(detectedRGB: number[], topN = 3): MatchResult {
     } catch (e) {
       dE = 9999;
     }
+    // Convert deltaE to confidence: lower deltaE = higher confidence
+    // deltaE <= 1 is imperceptible, <= 2 is just noticeable
+    // We map this to a confidence percentage
+    const confidence = Math.max(0, Math.min(100, 100 - (dE * 10)));
+    
     return {
       name: row.name,
       hex: normalizeHex(row.hex),
       family: row.family,
       deltaE: Number((isFinite(dE) ? Number(dE) : 9999).toFixed(2)),
+      confidence: Math.round(confidence),
     };
   });
 
