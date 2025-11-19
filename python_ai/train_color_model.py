@@ -45,12 +45,20 @@ sigma = np.array(args.sigma, dtype=np.float32)
 X_list = []
 y_list = []
 for lab_vec, lab_name in zip(labs, labels):
-    # Enhanced augmentation: use multiple sigma levels
-    for sigma_level in [sigma * 0.8, sigma, sigma * 1.2]:
-        noise = np.random.normal(0.0, sigma_level, size=(N // 3, 3)).astype(np.float32)
-        samples = lab_vec + noise
-        X_list.append(samples)
-        y_list.extend([lab_name] * (N // 3))
+    # Enhanced augmentation: use multiple sigma levels and simulate shadows/highlights
+    sigma_levels = [sigma * 0.8, sigma, sigma * 1.2]
+    l_scales = [0.6, 0.8, 1.0, 1.2]  # simulate darker (shadow) and brighter (highlight) L values
+    per_group = max(1, N // (len(sigma_levels) * len(l_scales)))
+    for sigma_level in sigma_levels:
+        for l_scale in l_scales:
+            # scale the L channel to simulate shadow/bright conditions
+            base = np.array(lab_vec, dtype=np.float32)
+            scaled_base = base.copy()
+            scaled_base[0] = scaled_base[0] * l_scale
+            noise = np.random.normal(0.0, sigma_level, size=(per_group, 3)).astype(np.float32)
+            samples = scaled_base + noise
+            X_list.append(samples)
+            y_list.extend([lab_name] * per_group)
 
 X = np.vstack(X_list).astype(np.float32)
 y = np.array(y_list)
