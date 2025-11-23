@@ -44,6 +44,11 @@ N = args.samples_per_class
 sigma = np.array(args.sigma, dtype=np.float32)
 X_list = []
 y_list = []
+
+def is_valid_sample(lab_sample):
+    """Check if LAB sample is valid (L > 5 to avoid pure black / noise)"""
+    return lab_sample[0] > 5  # L channel > 5
+
 for lab_vec, lab_name in zip(labs, labels):
     # Enhanced augmentation: use multiple sigma levels and simulate shadows/highlights
     sigma_levels = [sigma * 0.8, sigma, sigma * 1.2]
@@ -57,8 +62,11 @@ for lab_vec, lab_name in zip(labs, labels):
             scaled_base[0] = scaled_base[0] * l_scale
             noise = np.random.normal(0.0, sigma_level, size=(per_group, 3)).astype(np.float32)
             samples = scaled_base + noise
-            X_list.append(samples)
-            y_list.extend([lab_name] * per_group)
+            # Filter out invalid samples (L < 5)
+            valid_samples = np.array([s for s in samples if is_valid_sample(s)])
+            if len(valid_samples) > 0:
+                X_list.append(valid_samples)
+                y_list.extend([lab_name] * len(valid_samples))
 
 X = np.vstack(X_list).astype(np.float32)
 y = np.array(y_list)

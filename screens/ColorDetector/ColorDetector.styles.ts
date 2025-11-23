@@ -1,13 +1,20 @@
 import { StyleSheet, Dimensions } from 'react-native';
 const { width } = Dimensions.get('window');
 const SCALE = Math.max(0.9, Math.min(width / 375, 1.18));
-const rf = (n: number) => Math.round(n * SCALE);
+export const rf = (n: number) => Math.round(n * SCALE);
+
+export const REFERENCE_BOX_DEFAULT_SIZE = 0.4; // inches
+export const REFERENCE_BOX_MIN_SIZE = 0.1; // inches
+export const REFERENCE_BOX_MAX_SIZE = 0.4; // inches
+export const PIXELS_PER_INCH = 96; // Standard DPI
+
 export const CROSSHAIR_LENGTH_FACTOR = 0.5;
 export const CROSSHAIR_LENGTH_FACTOR_FROZEN = 0.35;
 export const CROSSHAIR_THICKNESS = 2;
 export const CROSSHAIR_DOT_SIZE = 10;
 export const CROSSHAIR_DOT_BORDER = 2;
 export const CROSSHAIR_CONTAINER_SIZE = CROSSHAIR_DOT_SIZE + CROSSHAIR_DOT_BORDER * 2;
+
 export const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: rf(14) },
@@ -70,4 +77,20 @@ export const styles = StyleSheet.create({
   processingText: { fontSize: rf(15), color: '#111', marginTop: rf(8), fontWeight: '600' },
   tapMarkerRoot: { position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none' },
   tapMarkerDot: { position: 'absolute', width: rf(18), height: rf(18), borderRadius: rf(9), backgroundColor: 'rgba(0,200,80,0.95)', borderWidth: 2, borderColor: '#fff', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },
+  
+  // Reference boxes styles
+  referenceBoxContainer: { position: 'absolute', bottom: rf(12), left: rf(12), right: rf(12), flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', elevation: 20 },
+  referenceBoxWrapper: { alignItems: 'center' },
+  referenceBox: { borderWidth: 2, borderColor: '#FFF', backgroundColor: 'rgba(255,255,255,0.1)', position: 'relative' },
+  referenceBoxLabel: { fontSize: rf(12), color: '#fff', fontWeight: '600', marginTop: rf(6), textAlign: 'center', maxWidth: rf(80) },
+  referenceBoxDisabled: { opacity: 0.4 },
+  referenceBoxControls: { flexDirection: 'row', marginTop: rf(8), gap: rf(8) },
+  sizeControl: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 6, paddingHorizontal: rf(6), paddingVertical: rf(4) },
+  sizeButton: { width: rf(28), height: rf(28), borderRadius: 4, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FF8C2B' },
+  sizeButtonText: { color: '#fff', fontWeight: '700', fontSize: rf(16) },
+  sizeText: { color: '#fff', fontSize: rf(11), fontWeight: '600', marginHorizontal: rf(6), minWidth: rf(40), textAlign: 'center' },
+  toggleButton: { width: rf(32), height: rf(32), borderRadius: 4, justifyContent: 'center', alignItems: 'center', backgroundColor: '#2B7FFF' },
+  toggleButtonText: { color: '#fff', fontWeight: '700', fontSize: rf(14) },
+  warningContainer: { position: 'absolute', top: rf(12), left: rf(12), right: rf(12), backgroundColor: 'rgba(255,100,100,0.9)', paddingVertical: rf(10), paddingHorizontal: rf(12), borderRadius: 8, elevation: 15, maxWidth: '100%' },
+  warningText: { color: '#fff', fontSize: rf(14), fontWeight: '600', textAlign: 'center' },
 });

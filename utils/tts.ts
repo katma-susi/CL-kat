@@ -1,5 +1,6 @@
 let Tts: any = null
 let TtsReady = false
+let TtsSuppressed = false  // Global suppression flag
 import { Platform } from 'react-native'
 
 export const initTts = () => {
@@ -27,9 +28,18 @@ export const initTts = () => {
   }
 }
 
-
+// Allow external code to suppress TTS
+export const setSuppressed = (suppressed: boolean) => {
+  TtsSuppressed = suppressed
+}
 
 export const speak = (text: string) => {
+  // Check global suppression flag first
+  if (TtsSuppressed) {
+    console.log('TTS suppressed, not speaking:', text)
+    return false
+  }
+  
   if (!Tts) {
     if (!initTts()) return false
   }
@@ -37,10 +47,19 @@ export const speak = (text: string) => {
     if (Tts.getInitStatus && !TtsReady) {
       console.log('TTS not ready yet, scheduling speak after init:', text)
       const scheduled = () => {
+        // Check suppression again before actually speaking
+        if (TtsSuppressed) {
+          console.log('TTS suppressed before scheduled speak:', text)
+          return
+        }
         try { Tts.stop && Tts.stop(); Tts.speak && Tts.speak(text); console.log('TTS speak executed after init:', text) } catch (e) { console.log('TTS speak error after init', e) }
       }
       Tts.getInitStatus().then(() => { TtsReady = true; scheduled() }).catch((err:any) => { console.log('TTS getInitStatus failed when scheduling speak', err);  scheduled() })
-      setTimeout(() => { try { Tts.stop && Tts.stop(); Tts.speak && Tts.speak(text); console.log('TTS speak attempted by timeout:', text) } catch (e) { console.log('TTS speak timeout error', e) } }, 2000)
+      setTimeout(() => { 
+        if (!TtsSuppressed) {
+          try { Tts.stop && Tts.stop(); Tts.speak && Tts.speak(text); console.log('TTS speak attempted by timeout:', text) } catch (e) { console.log('TTS speak timeout error', e) } 
+        } 
+      }, 2000)
       return true
     }
 
@@ -66,4 +85,5 @@ export const speak = (text: string) => {
 
 export const stop = () => {
   try { Tts && Tts.stop && Tts.stop() } catch (e) {}
+  TtsSuppressed = true  // Also set suppression flag
 }

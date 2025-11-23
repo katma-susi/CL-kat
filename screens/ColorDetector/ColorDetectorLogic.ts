@@ -85,6 +85,113 @@ export const hexToRgb = (hex: string): number[] => {
   const b = parseInt(h.slice(4,6), 16) || 0;
   return [r,g,b];
 };
+
+export const rgbToHex = (r: number, g: number, b: number): string => {
+  const toHex = (n: number) => {
+    const hex = Math.round(Math.max(0, Math.min(255, n))).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  };
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+};
+
+// Color space helpers: sRGB -> linear -> XYZ -> Lab
+export const srgbToLinear = (v: number) => {
+  const s = v / 255;
+  return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+};
+
+export const linearToSrgb = (v: number) => {
+  const c = Math.max(0, Math.min(1, v));
+  return c <= 0.0031308 ? Math.round((12.92 * c) * 255) : Math.round(((1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255));
+};
+
+const rgbToXyz = (r: number, g: number, b: number) => {
+  // convert sRGB to linear
+  const R = srgbToLinear(r);
+  const G = srgbToLinear(g);
+  const B = srgbToLinear(b);
+  // sRGB D65 conversion matrix
+  const X = R * 0.4124564 + G * 0.3575761 + B * 0.1804375;
+  const Y = R * 0.2126729 + G * 0.7151522 + B * 0.0721750;
+  const Z = R * 0.0193339 + G * 0.1191920 + B * 0.9503041;
+  return { X, Y, Z };
+};
+
+const xyzToLab = (X: number, Y: number, Z: number) => {
+  // Reference white D65
+  const Xn = 0.95047;
+  const Yn = 1.00000;
+  const Zn = 1.08883;
+  const eps = 216/24389; // 0.008856
+  const k = 24389/27; // 903.3
+  const fx = X / Xn;
+  const fy = Y / Yn;
+  const fz = Z / Zn;
+  const f = (t: number) => t > eps ? Math.cbrt(t) : (t * k + 16) / 116;
+  const l = 116 * f(fy) - 16;
+  const a = 500 * (f(fx) - f(fy));
+  const b = 200 * (f(fy) - f(fz));
+  return { L: l, a, b };
+};
+
+export const rgbToLab = (r: number, g: number, b: number) => {
+  const xyz = rgbToXyz(r, g, b);
+  return xyzToLab(xyz.X, xyz.Y, xyz.Z);
+};
+
+// Compute per-channel white gains from a measured white RGB sample
+export const computeWhiteGains = (r: number, g: number, b: number) => {
+  // convert to linear
+  const lr = srgbToLinear(r);
+  const lg = srgbToLinear(g);
+  const lb = srgbToLinear(b);
+  const avg = (lr + lg + lb) / 3 || 1e-6;
+  const gr = avg / Math.max(lr, 1e-6);
+  const gg = avg / Math.max(lg, 1e-6);
+  const gb = avg / Math.max(lb, 1e-6);
+  return { gr, gg, gb };
+};
+
+// Simple per-channel white normalization matching Color Meter: corr = 255 / white_channel
+export const computeSimpleWhiteGains = (r: number, g: number, b: number) => {
+  const rr = Math.max(1, r);
+  const gg = Math.max(1, g);
+  const bb = Math.max(1, b);
+  const gr = 255 / rr;
+  const ggain = 255 / gg;
+  const gb = 255 / bb;
+  return { gr, gg: ggain, gb };
+};
+
+// Apply per-channel gains to a sample RGB and return corrected sRGB 0..255
+export const applyWhiteBalanceCorrection = (sample: {r:number;g:number;b:number}, gains: {gr:number;gg:number;gb:number}) => {
+  const lr = srgbToLinear(sample.r) * gains.gr;
+  const lg = srgbToLinear(sample.g) * gains.gg;
+  const lb = srgbToLinear(sample.b) * gains.gb;
+  const cr = linearToSrgb(Math.min(1, lr));
+  const cg = linearToSrgb(Math.min(1, lg));
+  const cb = linearToSrgb(Math.min(1, lb));
+  return { r: cr, g: cg, b: cb };
+};
+
+// Simple apply: multiply each channel by gain and clamp to 0..255 (Color Meter approach)
+export const applySimpleWhiteBalanceCorrection = (sample: {r:number;g:number;b:number}, gains: {gr:number;gg:number;gb:number}) => {
+  const r = Math.round(Math.max(0, Math.min(255, sample.r * gains.gr)));
+  const g = Math.round(Math.max(0, Math.min(255, sample.g * gains.gg)));
+  const b = Math.round(Math.max(0, Math.min(255, sample.b * gains.gb)));
+  return { r, g, b };
+};
+
+// Store computed white gains for automatic calibration
+let calibratedGains: { gr: number; gg: number; gb: number } | null = null;
+
+export const setCalibratedGains = (gains: { gr: number; gg: number; gb: number }) => {
+  calibratedGains = gains;
+};
+
+export const getCalibratedGains = () => calibratedGains;
+
+export const clearCalibratedGains = () => { calibratedGains = null; };
 export const decodeJpegAndSampleCenter = (base64: string): { r:number,g:number,b:number } | null => {
   const { jpegjs: _jpegjs, BufferShim: _BufferShim } = getJpegUtils();
   if (!_jpegjs || !_BufferShim) return null;
@@ -228,3 +335,111 @@ export function mapLocalPressToPreviewCoords(e: any, previewLayoutRef: { current
     return { relX: 0, relY: 0 };
   }
 }
+
+// White surface validation functions
+export const isWhiteSurface = (r: number, g: number, b: number): boolean => {
+  // Use Lab-based check: high lightness and low chroma indicates neutral white
+  try {
+    const lab = rgbToLab(r, g, b);
+    const L = lab.L; // 0..100 typical
+    const a = lab.a;
+    const b_ = lab.b;
+    const chroma = Math.sqrt(a*a + b_*b_);
+    // Relaxed thresholds to tolerate typical printing paper under smartphone lighting:
+    // - Lightness >= 60 (allows RGB ~140-160 range)
+    // - Chroma <= 16 (low color cast)
+    if (L >= 60 && chroma <= 16) return true;
+    // Fallback RGB test - more lenient to handle varied lighting conditions
+    const minWhiteThreshold = 140;  // Lowered from 170
+    const maxDelta = 35;             // Increased from 28 to allow more variance
+    if (r < minWhiteThreshold || g < minWhiteThreshold || b < minWhiteThreshold) return false;
+    const maxVal = Math.max(r, g, b);
+    const minVal = Math.min(r, g, b);
+    const delta = maxVal - minVal;
+    return delta <= maxDelta;
+  } catch (_e) {
+    // On error, fallback to RGB check
+    const minWhiteThreshold = 140;  // Lowered from 170
+    const maxDelta = 35;             // Increased from 28
+    if (r < minWhiteThreshold || g < minWhiteThreshold || b < minWhiteThreshold) return false;
+    const maxVal = Math.max(r, g, b);
+    const minVal = Math.min(r, g, b);
+    const delta = maxVal - minVal;
+    return delta <= maxDelta;
+  }
+};
+
+
+
+// Adaptive white calibration: stores a reference white from user calibration
+let calibratedWhiteLab: { L: number; a: number; b: number; chroma: number } | null = null;
+
+export const setCalibratedWhite = (r: number, g: number, b: number) => {
+  const lab = rgbToLab(r, g, b);
+  const chroma = Math.sqrt(lab.a * lab.a + lab.b * lab.b);
+  calibratedWhiteLab = { L: lab.L, a: lab.a, b: lab.b, chroma };
+};
+
+export const getCalibratedWhite = () => calibratedWhiteLab;
+
+export const clearCalibratedWhite = () => {
+  calibratedWhiteLab = null;
+};
+
+// Check white surface against calibration reference with tolerance
+const isWhiteSurfaceCalibrated = (r: number, g: number, b: number): boolean => {
+  if (!calibratedWhiteLab) return false;
+  const lab = rgbToLab(r, g, b);
+  const chroma = Math.sqrt(lab.a * lab.a + lab.b * lab.b);
+  // Tolerance: relaxed a bit for handheld phones
+  const lTol = 14;
+  const chromaTol = 12;
+  return (
+    Math.abs(lab.L - calibratedWhiteLab.L) <= lTol &&
+    chroma <= calibratedWhiteLab.chroma + chromaTol
+  );
+};
+
+export const getWhiteSurfaceStatus = (r: number, g: number, b: number, useCalibration?: boolean): { status: 'ok' | 'not_white', message: string } => {
+  // If calibration is available and enabled, use adaptive threshold
+  if (useCalibration && calibratedWhiteLab) {
+    if (isWhiteSurfaceCalibrated(r, g, b)) {
+      return { status: 'ok', message: '' };
+    }
+    // If calibration exists but doesn't match, still try default test
+  }
+  if (!isWhiteSurface(r, g, b)) {
+    return { status: 'not_white', message: 'Left box not on white paper - ensure white surface is visible' };
+  }
+  return { status: 'ok', message: '' };
+};
+
+// Median sampling: given an array of RGB values, return the median
+export const medianRgb = (samples: Array<{r: number; g: number; b: number}>): {r: number; g: number; b: number} | null => {
+  if (samples.length === 0) return null;
+  const rs = samples.map(s => s.r).sort((a, b) => a - b);
+  const gs = samples.map(s => s.g).sort((a, b) => a - b);
+  const bs = samples.map(s => s.b).sort((a, b) => a - b);
+  const mid = Math.floor(samples.length / 2);
+  return {
+    r: samples.length % 2 === 1 ? rs[mid] : Math.round((rs[mid - 1] + rs[mid]) / 2),
+    g: samples.length % 2 === 1 ? gs[mid] : Math.round((gs[mid - 1] + gs[mid]) / 2),
+    b: samples.length % 2 === 1 ? bs[mid] : Math.round((bs[mid - 1] + bs[mid]) / 2),
+  };
+};
+
+// Return fraction (0..1) of pixels in a patch that are near-white by a simple RGB test
+export const fractionWhiteInSamples = (samples: Array<{r:number;g:number;b:number}>, minWhiteThreshold = 170, maxDelta = 28) => {
+  if (!samples || samples.length === 0) return 0;
+  let count = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i];
+    if (!s) continue;
+    if (s.r >= minWhiteThreshold && s.g >= minWhiteThreshold && s.b >= minWhiteThreshold) {
+      const maxv = Math.max(s.r, s.g, s.b);
+      const minv = Math.min(s.r, s.g, s.b);
+      if ((maxv - minv) <= maxDelta) count++;
+    }
+  }
+  return count / samples.length;
+};

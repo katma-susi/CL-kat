@@ -11,12 +11,12 @@ try {
 let captureRef: any = null;
 try { captureRef = require('react-native-view-shot').captureRef; } catch (_e) { captureRef = null; }
 import { ICONS } from '../../Images';
-import { styles } from './ColorDetector.styles';
-import { getFallbackColor, getJpegUtils, getJpegOrientation, decodeJpegAndSampleCenter as _decodeCenter, decodeJpegAndSampleAt as _decodeAt, hexToRgb, processWithIndicator, mapPressToPreviewCoords, mapLocalPressToPreviewCoords } from './ColorDetectorLogic';
+import { styles, REFERENCE_BOX_DEFAULT_SIZE, REFERENCE_BOX_MIN_SIZE, REFERENCE_BOX_MAX_SIZE, PIXELS_PER_INCH, rf } from './ColorDetector.styles';
+import { getFallbackColor, getJpegUtils, getJpegOrientation, decodeJpegAndSampleCenter as _decodeCenter, decodeJpegAndSampleAt as _decodeAt, hexToRgb, rgbToHex, processWithIndicator, mapPressToPreviewCoords, mapLocalPressToPreviewCoords, isWhiteSurface, isTooDark, getWhiteSurfaceStatus, medianRgb, computeSimpleWhiteGains, setCalibratedGains, getCalibratedGains, applySimpleWhiteBalanceCorrection, fractionWhiteInSamples } from './ColorDetectorLogic';
 import { findClosestColor } from '../../services/ColorMatcher';
 import { findClosestColorAsync } from '../../services/ColorMatcherWorker';
 import { inferColorFromRGB } from '../../services/ColorDetectorInference';
-import { speak, initTts, stop as stopTts } from '../../utils/tts';
+import { speak, initTts, stop as stopTts, setSuppressed } from '../../utils/tts';
 
 let RNCamera: any = null;
 let VisionCamera: any = null;
@@ -77,7 +77,42 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
   const permissionInitializedRef = useRef(false);
   const exitAppPendingRef = useRef(false);
 
+  // Reference box states
+  const [referenceBoxSizeInches, setReferenceBoxSizeInches] = useState<number>(REFERENCE_BOX_DEFAULT_SIZE);
+  const [leftBoxEnabled, setLeftBoxEnabled] = useState<boolean>(true);
+  const leftBoxEnabledRef = useRef<boolean>(true); // Keep in sync with state for use in async functions
+  const [referenceBoxSamples, setReferenceBoxSamples] = useState<{left: {r:number,g:number,b:number}|null, right: {r:number,g:number,b:number}|null}>({left: null, right: null});
+  const [whiteBalanceStatus, setWhiteBalanceStatus] = useState<{ status: 'ok' | 'too_dark' | 'not_white', message: string }>({ status: 'ok', message: '' });
+  const lastWarningSpokenRef = useRef<number>(0);
+  
+  // Calibration: gains are stored in ColorDetectorLogic; use getCalibratedGains()
+  const [cameraExposureLocked, setCameraExposureLocked] = useState<boolean>(false);
+  const WARNING_SPEAK_COOLDOWN = 2000;
+
   const processingFrameRef = useRef(false);
+  const leftWhiteHistoryRef = useRef<number[]>([]);
+  const LEFT_WHITE_HISTORY_SIZE = 5;
+  const LEFT_WHITE_REQUIRED = 3; // need at least 3 of last 5 frames
+
+  // Debug overlay state
+  const [debugVisible, setDebugVisible] = useState<boolean>(false);
+  const [debugLeftMedian, setDebugLeftMedian] = useState<{r:number;g:number;b:number}|null>(null);
+  const [debugLeftFraction, setDebugLeftFraction] = useState<number|null>(null);
+  const [debugGains, setDebugGains] = useState<{gr:number;gg:number;gb:number}|null>(null);
+  const [debugCorrectedRight, setDebugCorrectedRight] = useState<{r:number;g:number;b:number}|null>(null);
+  const [debugRightRaw, setDebugRightRaw] = useState<{r:number;g:number;b:number}|null>(null);
+  const [debugRightMatch, setDebugRightMatch] = useState<string | null>(null);
+
+  const pushLeftWhiteHistory = (isWhite: boolean) => {
+    try {
+      const arr = leftWhiteHistoryRef.current || [];
+      arr.push(isWhite ? 1 : 0);
+      while (arr.length > LEFT_WHITE_HISTORY_SIZE) arr.shift();
+      leftWhiteHistoryRef.current = arr;
+      const sum = arr.reduce((s,n) => s + n, 0);
+      return sum >= LEFT_WHITE_REQUIRED;
+    } catch (_e) { return !!isWhite; }
+  };
 
   const safeSpeak = (text: string, opts?: { force?: boolean }) => {
     try { if (suppressSpeechRef.current && !(opts && opts.force)) return false; } catch (_e) {}
@@ -89,7 +124,99 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     }
   };
 
-  useEffect(() => { try { initTts(); } catch (_e) {} }, []);
+  const safeWarningSpeak = (text: string) => {
+    try {
+      // Never speak warnings if left box is disabled
+      if (!leftBoxEnabled || suppressSpeechRef.current) return false;
+      const now = Date.now();
+      if (now - lastWarningSpokenRef.current < WARNING_SPEAK_COOLDOWN) return false;
+      const res = speak(text);
+      lastWarningSpokenRef.current = now;
+      return res;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const updateWhiteBalanceStatus = (r: number, g: number, b: number) => {
+    // If left box is disabled, NEVER set any warning or speak anything
+    try {
+      if (!leftBoxEnabled) {
+        // Aggressively clear status and suppress all speech
+        setWhiteBalanceStatus({ status: 'ok', message: '' });
+        suppressSpeechRef.current = true;
+        return;
+      }
+      const status = getWhiteSurfaceStatus(r, g, b, Boolean(getCalibratedGains()));
+      setWhiteBalanceStatus(status);
+      // Speak warning only when left-box is enabled and voice is enabled
+      if (status.status !== 'ok' && voiceEnabled) {
+        // Allow warning speech only when left box is explicitly enabled
+        suppressSpeechRef.current = false;
+        safeWarningSpeak(status.message);
+      }
+    } catch (_e) {
+      // On error, do not surface a warning if left box is disabled
+      if (!leftBoxEnabled) {
+        setWhiteBalanceStatus({ status: 'ok', message: '' });
+        suppressSpeechRef.current = true;
+      }
+    }
+  };
+
+  // Calibration is automatic: computed and stored in ColorDetectorLogic when left box is detected as white
+
+  // Lock camera exposure/white balance (VisionCamera API)
+  const lockCameraExposure = async () => {
+    try {
+      if (!cameraRef.current) return;
+      const ref = cameraRef.current as any;
+      // VisionCamera: if supported, lock exposure/white balance
+      if (ref.setExposureCompensation) {
+        await ref.setExposureCompensation(0).catch(() => {});
+      }
+      // If camera supports white balance locking
+      if (ref.setWhiteBalance) {
+        await ref.setWhiteBalance('manual').catch(() => {});
+      }
+      setCameraExposureLocked(true);
+    } catch (err) {
+      console.error('Exposure lock error:', err);
+    }
+  };
+
+  const handleReferenceBoxSizeChange = (delta: number) => {
+    const newSize = Math.max(REFERENCE_BOX_MIN_SIZE, Math.min(REFERENCE_BOX_MAX_SIZE, referenceBoxSizeInches + delta));
+    setReferenceBoxSizeInches(newSize);
+  };
+
+  const getReferenceBoxPixelSize = (): number => {
+    return referenceBoxSizeInches * PIXELS_PER_INCH;
+  };
+
+  useEffect(() => { 
+    try { initTts(); } catch (_e) {} 
+    lockCameraExposure();
+  }, []);
+  // If the user disables the left box, immediately clear any white warnings and stop TTS
+  useEffect(() => {
+    try {
+      leftBoxEnabledRef.current = leftBoxEnabled; // Keep ref in sync
+      if (!leftBoxEnabled) {
+        // Aggressively suppress all speech immediately at the TTS level
+        setSuppressed(true);
+        suppressSpeechRef.current = true;
+        try { stopTts(); } catch (_e) {}
+        // Multiple attempts to stop TTS to ensure it's silenced
+        setTimeout(() => { try { stopTts(); } catch (_e) {} }, 50);
+        setTimeout(() => { try { stopTts(); } catch (_e) {} }, 150);
+        setWhiteBalanceStatus({ status: 'ok', message: '' });
+      } else {
+        // Re-enable TTS when left box is turned back on
+        setSuppressed(false);
+      }
+    } catch (_e) {}
+  }, [leftBoxEnabled]);
   useEffect(() => { exitAppPendingRef.current = false; }, []);
 
   const processSnapshotAndSample = async (): Promise<boolean> => {
@@ -112,9 +239,21 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
       } catch (err) { blobLike = null; }
       if (!blobLike) { processingFrameRef.current = false; return false; }
       let base64: string | null = null;
+      // clear previous per-pass debug entries
+      try { setDebugRightRaw(null); setDebugRightMatch(null); } catch (_e) {}
+      // If left box is disabled, also clear any left-box debug/white status so it won't appear to update
+      try {
+        if (!leftBoxEnabledRef.current) {
+          try { setDebugLeftMedian(null); } catch (_e) {}
+          try { setDebugLeftFraction(null); } catch (_e) {}
+          try { leftWhiteHistoryRef.current = []; } catch (_e) {}
+          try { setWhiteBalanceStatus({ status: 'ok', message: '' }); } catch (_e) {}
+        }
+      } catch (_e) {}
       let uri: string | undefined = blobLike?.path || blobLike?.uri || blobLike?.localUri || blobLike?.filePath || blobLike?.file;
       try { if (uri && typeof uri === 'string' && uri.startsWith('/')) uri = 'file://' + uri; } catch (_e) {}
       try {
+        console.log('[ColorDetector] blobLike snapshot:', { path: blobLike?.path || blobLike?.uri || blobLike?.localUri || blobLike?.filePath || blobLike?.file, hasBase64: !!blobLike?.base64 });
         if (uri && typeof uri === 'string' && (uri.startsWith('file://') || uri.startsWith('content://'))) {
           try {
             const normalizedUri = (uri.startsWith('/') ? ('file://' + uri) : uri);
@@ -122,20 +261,157 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
             if (typeof decodeScaledRegion === 'function') {
               const pw = previewLayout.current?.width || 0;
               const ph = previewLayout.current?.height || 0;
-              const cx = pw ? Math.round(pw / 2) : 0;
-              const cy = ph ? Math.round(ph / 2) : 0;
-              const nativeSample = await decodeScaledRegion(normalizedUri, cx, cy, pw, ph);
-              if (nativeSample && typeof nativeSample.r === 'number') {
-                const inferred = await inferColorFromRGB({ r: nativeSample.r, g: nativeSample.g, b: nativeSample.b }).catch(() => null);
-                if (inferred) {
-                  const live = { family: inferred.family, hex: inferred.hex, realName: inferred.realName, confidence: inferred.confidence };
-                  if (!freeze) setLiveDetected(live);
-                  processingFrameRef.current = false;
-                  return true;
+              console.log('[ColorDetector] native decode branch, preview size:', { pw, ph });
+              console.log('[ColorDetector] leftBoxEnabled (ref) state:', leftBoxEnabledRef.current);
+              console.log('[ColorDetector] About to enter !leftBoxEnabledRef.current check...');
+              
+              // If left box is disabled, skip left sampling and go directly to right box
+              if (!leftBoxEnabledRef.current) {
+                console.log('[ColorDetector] YES - LEFT BOX DISABLED — will sample right box only');
+                const rightBoxRelX = pw * 0.75; // Right box is at 75% from left
+                const rightBoxRelY = ph * 0.75; // Right box is at 75% from top (bottom area)
+                console.log(`[ColorDetector Native] Left disabled - Attempting native decode at (${rightBoxRelX.toFixed(0)}, ${rightBoxRelY.toFixed(0)})`);
+                const rightSample = await decodeScaledRegion(normalizedUri, rightBoxRelX, rightBoxRelY, pw, ph);
+                console.log(`[ColorDetector Native] Right sample result:`, rightSample ? `${rightSample.r},${rightSample.g},${rightSample.b}` : 'null');
+                try { setDebugRightRaw(rightSample); setDebugRightMatch(null); } catch (_e) {}
+                // If native decode fails, try a JPEG decode fallback immediately
+                if (!rightSample) {
+                  try {
+                    console.log('[ColorDetector Native] decodeScaledRegion returned null — trying JPEG fallback');
+                    const RNFS = require('react-native-fs');
+                    const base64 = await RNFS.readFile(normalizedUri.replace('file://',''), 'base64');
+                    const { jpegjs: _jpegjs, BufferShim: _BufferShim } = getJpegUtils();
+                    if (_jpegjs && _BufferShim && base64) {
+                      const buffer = _BufferShim.from(base64, 'base64');
+                      const decoded = _jpegjs.decode(buffer, { useTArray: true });
+                      if (decoded && decoded.width && decoded.data) {
+                        const w = decoded.width; const h = decoded.height; const data = decoded.data;
+                        const rx = Math.floor((rightBoxRelX / pw) * w);
+                        const ry = Math.floor((rightBoxRelY / ph) * h);
+                        const rRadius = Math.max(1, Math.floor(Math.min(w, h) * 0.02));
+                        const samples: Array<{r:number;g:number;b:number}> = [];
+                        for (let yy = Math.max(0, ry - rRadius); yy <= Math.min(h-1, ry + rRadius); yy++) {
+                          for (let xx = Math.max(0, rx - rRadius); xx <= Math.min(w-1, rx + rRadius); xx++) {
+                            const idx = (yy * w + xx) * 4;
+                            samples.push({ r: data[idx], g: data[idx+1], b: data[idx+2] });
+                          }
+                        }
+                        if (samples.length > 0) {
+                          const median = medianRgb(samples);
+                          console.log('[ColorDetector Native] JPEG fallback median:', median ? `${median.r},${median.g},${median.b}` : 'null');
+                          if (median) {
+                            try { setDebugRightRaw(median); } catch (_e) {}
+                            // proceed to inference/matcher fallback below by assigning rightSample-like object
+                            // reuse variable name for downstream logic
+                            // @ts-ignore
+                            rightSample = median;
+                          }
+                        }
+                      }
+                    }
+                  } catch (_e) { console.log('[ColorDetector Native] JPEG fallback failed:', _e); }
+                }
+                if (rightSample && typeof rightSample.r === 'number') {
+                  try { setDebugCorrectedRight(rightSample); } catch (_e) {}
+                  console.log(`[ColorDetector Native] About to infer color`);
+                  const inferred = await inferColorFromRGB({ r: rightSample.r, g: rightSample.g, b: rightSample.b }).catch((e) => {
+                    console.log(`[ColorDetector Native] Inference error:`, e);
+                    return null;
+                  });
+                  console.log(`[ColorDetector Native] Inferred:`, inferred ? inferred.realName : 'null');
+                  if (inferred) {
+                    const live = { family: inferred.family, hex: inferred.hex, realName: inferred.realName, confidence: inferred.confidence };
+                    try { setDebugRightMatch(inferred.realName || inferred.family || inferred.hex || null); } catch (_e) {}
+                    if (!freeze) setLiveDetected(live);
+                    processingFrameRef.current = false;
+                    return true;
+                  }
+                  // Fallback: when left box is disabled, try matcher-based nearest color
+                  try {
+                    const match = await findClosestColorAsync([rightSample.r, rightSample.g, rightSample.b], 3).catch(() => null);
+                    console.log(`[ColorDetector Native] Matcher fallback:`, match ? match.closest_match : null);
+                    if (match && match.closest_match) {
+                      const cm = match.closest_match;
+                      const live = { family: cm.family || cm.name, hex: cm.hex, realName: cm.name, confidence: cm.confidence };
+                      try { setDebugRightMatch(cm.name || cm.family || cm.hex || null); } catch (_e) {}
+                      if (!freeze) setLiveDetected(live);
+                      processingFrameRef.current = false;
+                      return true;
+                    }
+                  } catch (_e) {}
+                }
+                // If native decoding didn't work, let it fall through to JPEG path
+              } else {
+                // Normal flow when left box is enabled: validate white first
+                console.log('[ColorDetector] NO - LEFT BOX IS ENABLED (ref), will sample left then right');
+                // First, sample from LEFT box position (bottom-left) to validate white
+                const leftBoxRelX = pw * 0.25; // Left box is at 25% from left
+                const leftBoxRelY = ph * 0.75; // Left box is at 75% from top (bottom area)
+                const leftSample = await decodeScaledRegion(normalizedUri, leftBoxRelX, leftBoxRelY, pw, ph);
+                if (leftSample && typeof leftSample.r === 'number') {
+                  let shouldProceedToRightBox = false;
+                  
+                  updateWhiteBalanceStatus(leftSample.r, leftSample.g, leftSample.b);
+                  // Populate debug for native path (single-sample)
+                  try { setDebugLeftMedian({ r: leftSample.r, g: leftSample.g, b: leftSample.b }); } catch (_e) {}
+                  try { setDebugLeftFraction(null); } catch (_e) {}
+                  try { setDebugGains(getCalibratedGains()); } catch (_e) {}
+                  const useCalibration = Boolean(getCalibratedGains());
+                  const whiteStatus = getWhiteSurfaceStatus(leftSample.r, leftSample.g, leftSample.b, useCalibration);
+                  // For native path we only have a single sample; push to history and require consensus
+                  const leftConsensus = pushLeftWhiteHistory(whiteStatus.status === 'ok');
+                  if (leftConsensus) {
+                    shouldProceedToRightBox = true;
+                    // Auto-calibrate once if not already calibrated
+                    if (!getCalibratedGains()) {
+                      try {
+                        const gains = computeSimpleWhiteGains(leftSample.r, leftSample.g, leftSample.b);
+                        setCalibratedGains(gains);
+                        try { setDebugGains(gains); } catch (_e) {}
+                      } catch (_e) {}
+                    }
+                  }
+                  
+                  // Now sample from RIGHT box position (bottom-right) for color detection
+                  if (shouldProceedToRightBox) {
+                      console.log(`[ColorDetector] Right median RGB: ${rightSampled ? `${rightSampled.r},${rightSampled.g},${rightSampled.b}` : 'null'}`);
+                      if (rightSampled) {
+                        try { setDebugRightRaw(rightSampled); setDebugRightMatch(null); } catch (_e) {}
+                        try { setDebugCorrectedRight(rightSampled); } catch (_e) {}
+                        console.log(`[ColorDetector] About to infer color from: ${rightSampled.r},${rightSampled.g},${rightSampled.b}`);
+                        const inferred = await inferColorFromRGB({ r: rightSampled.r, g: rightSampled.g, b: rightSampled.b }).catch((e) => {
+                          console.log(`[ColorDetector] Inference error:`, e);
+                          return null;
+                        });
+                        console.log(`[ColorDetector] Inferred result:`, inferred ? inferred.realName : 'null');
+                        if (inferred) {
+                          const live = { family: inferred.family, hex: inferred.hex, realName: inferred.realName, confidence: inferred.confidence };
+                          try { setDebugRightMatch(inferred.realName || inferred.family || inferred.hex || null); } catch (_e) {}
+                          if (!freeze) setLiveDetected(live);
+                          processingFrameRef.current = false;
+                          return true;
+                        }
+                        // Fallback to matcher if inference failed (left-box disabled mode)
+                        try {
+                          const match = findClosestColor([rightSampled.r, rightSampled.g, rightSampled.b], 3);
+                          console.log('[ColorDetector] Matcher fallback (sync):', match && match.closest_match ? match.closest_match.name : null);
+                          if (match && match.closest_match) {
+                            const cm = match.closest_match;
+                            const live = { family: cm.family || cm.name, hex: cm.hex, realName: cm.name, confidence: cm.confidence };
+                            try { setDebugRightMatch(cm.name || cm.family || cm.hex || null); } catch (_e) {}
+                            if (!freeze) setLiveDetected(live);
+                            processingFrameRef.current = false;
+                            return true;
+                          }
+                        } catch (_e) {}
+                      }
+                  }
                 }
               }
             }
-          } catch (nativeErr) {}
+          } catch (nativeErr) {
+            console.log('[ColorDetector] ERROR in native decode block:', nativeErr);
+          }
         }
       } catch (_e) {}
       if (blobLike?.base64) base64 = blobLike.base64;
@@ -151,25 +427,114 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         const decoded = _jpegjs.decode(buffer, { useTArray: true });
         if (!decoded || !decoded.width || !decoded.data) { processingFrameRef.current = false; return false; }
         const w = decoded.width; const h = decoded.height; const data = decoded.data;
-        const cx = Math.floor(w/2); const cy = Math.floor(h/2);
-        let rSum=0,gSum=0,bSum=0,count=0;
-        for (let yy = Math.max(0, cy-1); yy <= Math.min(h-1, cy+1); yy++) {
-          for (let xx = Math.max(0, cx-1); xx <= Math.min(w-1, cx+1); xx++) {
-            const idx = (yy * w + xx) * 4;
-            rSum += data[idx]; gSum += data[idx+1]; bSum += data[idx+2]; count++;
+        
+        // If left box is disabled, skip left sampling and go directly to right box
+        if (!leftBoxEnabledRef.current) {
+          const rx = Math.floor(w * 0.75);
+          const ry = Math.floor(h * 0.75);
+          const rRadius = Math.floor(Math.min(w, h) * 0.06);
+          const rightSamples: Array<{r:number;g:number;b:number}> = [];
+          for (let yy = Math.max(0, ry - rRadius); yy <= Math.min(h-1, ry + rRadius); yy++) {
+            for (let xx = Math.max(0, rx - rRadius); xx <= Math.min(w-1, rx + rRadius); xx++) {
+              const idx = (yy * w + xx) * 4;
+              rightSamples.push({ r: data[idx], g: data[idx+1], b: data[idx+2] });
+            }
+          }
+          console.log(`[ColorDetector] Left disabled - Right samples collected: ${rightSamples.length}`);
+          if (rightSamples.length > 0) {
+            const rightSampled = medianRgb(rightSamples);
+            console.log(`[ColorDetector] Right median RGB: ${rightSampled ? `${rightSampled.r},${rightSampled.g},${rightSampled.b}` : 'null'}`);
+            if (rightSampled) {
+              try { setDebugRightRaw(rightSampled); setDebugRightMatch(null); } catch (_e) {}
+              try { setDebugCorrectedRight(rightSampled); } catch (_e) {}
+              console.log(`[ColorDetector] About to infer color from: ${rightSampled.r},${rightSampled.g},${rightSampled.b}`);
+              const inferred = await inferColorFromRGB({ r: rightSampled.r, g: rightSampled.g, b: rightSampled.b }).catch((e) => {
+                console.log(`[ColorDetector] Inference error:`, e);
+                return null;
+              });
+              console.log(`[ColorDetector] Inferred result:`, inferred ? inferred.realName : 'null');
+              if (inferred) {
+                const live = { family: inferred.family, hex: inferred.hex, realName: inferred.realName, confidence: inferred.confidence };
+                if (!freeze) setLiveDetected(live);
+                processingFrameRef.current = false;
+                return true;
+              }
+            }
+          }
+        } else {
+          // Normal flow when left box is enabled
+          // Sample from LEFT reference box area (bottom-left) using median aggregation for robustness
+          const lx = Math.floor(w * 0.25);
+          const ly = Math.floor(h * 0.75);
+          const lRadius = Math.floor(Math.min(w, h) * 0.06); // slightly smaller patch to avoid background
+          const leftSamples: Array<{r:number;g:number;b:number}> = [];
+          for (let yy = Math.max(0, ly - lRadius); yy <= Math.min(h-1, ly + lRadius); yy++) {
+            for (let xx = Math.max(0, lx - lRadius); xx <= Math.min(w-1, lx + lRadius); xx++) {
+              const idx = (yy * w + xx) * 4;
+              leftSamples.push({ r: data[idx], g: data[idx+1], b: data[idx+2] });
+            }
+          }
+          if (leftSamples.length > 0) {
+            const leftSampled = medianRgb(leftSamples);
+            if (leftSampled) {
+              let shouldProceedToRightBox = false;
+              
+              updateWhiteBalanceStatus(leftSampled.r, leftSampled.g, leftSampled.b);
+              // Populate debug info from JPEG path
+              try { setDebugLeftMedian(leftSampled); } catch (_e) {}
+              const useCalibration = Boolean(getCalibratedGains());
+              // Use both a patch-majority test and Lab/RGB fallback for robustness
+              const patchFraction = fractionWhiteInSamples(leftSamples);
+              try { setDebugLeftFraction(patchFraction); } catch (_e) {}
+              try { setDebugGains(getCalibratedGains()); } catch (_e) {}
+              const patchOk = patchFraction >= 0.65;
+              const whiteStatus = getWhiteSurfaceStatus(leftSampled.r, leftSampled.g, leftSampled.b, useCalibration);
+              const leftIsWhite = patchOk || whiteStatus.status === 'ok';
+              const leftConsensus = pushLeftWhiteHistory(leftIsWhite);
+              if (leftConsensus) {
+                shouldProceedToRightBox = true;
+                // Auto-calibrate once if not already calibrated
+                if (!getCalibratedGains()) {
+                  try {
+                    const gains = computeSimpleWhiteGains(leftSampled.r, leftSampled.g, leftSampled.b);
+                    setCalibratedGains(gains);
+                    try { setDebugGains(gains); } catch (_e) {}
+                  } catch (_e) {}
+                }
+              }
+              
+              // Now sample from RIGHT reference box area (bottom-right) using median aggregation
+              if (shouldProceedToRightBox) {
+                const rx = Math.floor(w * 0.75);
+                const ry = Math.floor(h * 0.75);
+                const rRadius = Math.floor(Math.min(w, h) * 0.06); // slightly smaller patch
+                const rightSamples: Array<{r:number;g:number;b:number}> = [];
+                for (let yy = Math.max(0, ry - rRadius); yy <= Math.min(h-1, ry + rRadius); yy++) {
+                  for (let xx = Math.max(0, rx - rRadius); xx <= Math.min(w-1, rx + rRadius); xx++) {
+                    const idx = (yy * w + xx) * 4;
+                    rightSamples.push({ r: data[idx], g: data[idx+1], b: data[idx+2] });
+                  }
+                }
+                if (rightSamples.length > 0) {
+                  const rightSampled = medianRgb(rightSamples);
+                  if (rightSampled) {
+                    // Apply automatic white-balance correction if we have calibrated gains
+                    const gains = getCalibratedGains();
+                    const sampleForInference = gains ? applySimpleWhiteBalanceCorrection(rightSampled, gains) : rightSampled;
+                    try { setDebugCorrectedRight(sampleForInference); } catch (_e) {}
+                    const inferred = await inferColorFromRGB({ r: sampleForInference.r, g: sampleForInference.g, b: sampleForInference.b }).catch(() => null);
+                    if (inferred) {
+                      const live = { family: inferred.family, hex: inferred.hex, realName: inferred.realName, confidence: inferred.confidence };
+                      if (!freeze) setLiveDetected(live);
+                      processingFrameRef.current = false;
+                      return true;
+                    }
+                  }
+                }
+              }
+            }
           }
         }
-        if (count === 0) { processingFrameRef.current = false; return false; }
-        const sampled = { r: Math.round(rSum/count), g: Math.round(gSum/count), b: Math.round(bSum/count) };
-        try {
-          const inferred = await inferColorFromRGB({ r: sampled.r, g: sampled.g, b: sampled.b }).catch(() => null);
-          if (inferred) {
-            const live = { family: inferred.family, hex: inferred.hex, realName: inferred.realName, confidence: inferred.confidence };
-            if (!freeze) setLiveDetected(live);
-            processingFrameRef.current = false;
-            return true;
-          }
-        } catch (err) {}
       } catch (err) {}
       processingFrameRef.current = false;
       return false;
@@ -267,6 +632,11 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     else stopDetection();
   }, [cameraPermission]);
 
+  // When left-box is disabled we want to avoid erasing the last-good detection
+  // on a single transient sampling failure. Hold a short debounce timeout
+  // before clearing `liveDetected` to make right-only mode more stable.
+  const debounceClearRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!liveDetected || !voiceEnabled || freeze) return;
     if (voiceMode === 'disable') return;
@@ -284,11 +654,25 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     intervalRef.current = setInterval(() => {
       if (!freezeRef.current) {
         processSnapshotAndSample().then((ok) => {
-          if (!ok) {
-            const c = getFallbackColor();
-            try { const rgb = hexToRgb(c.hex); const match = findClosestColor(rgb, 3); const live = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name, confidence: match.closest_match.confidence }; setLiveDetected(live); } catch (err) { setLiveDetected(c); }
+          if (ok) {
+            // successful sample — clear any pending debounce
+            try { if (debounceClearRef.current) { clearTimeout(debounceClearRef.current as any); debounceClearRef.current = null; } } catch (_e) {}
+            return;
           }
-        }).catch(() => { const c = getFallbackColor(); try { const rgb = hexToRgb(c.hex); const match = findClosestColor(rgb, 3); const live = { family: match.closest_match.family || match.closest_match.name, hex: match.closest_match.hex, realName: match.closest_match.name, confidence: match.closest_match.confidence }; setLiveDetected(live); } catch (err) { setLiveDetected(c); } });
+          // on failure: when left box is enabled, clear immediately (keep legacy behaviour)
+          if (leftBoxEnabled) {
+            setLiveDetected(null);
+            return;
+          }
+          // when left box is disabled, schedule a short debounce clear so
+          // intermittent misses don't erase the last known detection immediately
+          try {
+            if (debounceClearRef.current) { clearTimeout(debounceClearRef.current as any); debounceClearRef.current = null; }
+            debounceClearRef.current = setTimeout(() => { try { setLiveDetected(null); } catch (_e) {} debounceClearRef.current = null; }, 1600) as unknown as number;
+          } catch (_e) { setLiveDetected(null); }
+        }).catch(() => {
+          if (leftBoxEnabled) setLiveDetected(null);
+        });
       }
     }, 800);
   };
@@ -1001,6 +1385,9 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
           <Image source={ICONS.ARROWicon} style={styles.backIconImage} />
         </TouchableOpacity>
   <TouchableOpacity onPress={() => { openSettings(); }} style={styles.settingsButton}><Text style={styles.settingsText}>⚙️</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setDebugVisible((v) => !v)} style={[styles.settingsButton, { marginLeft: 8 }]}>
+              <Text style={styles.settingsText}>{debugVisible ? 'DBG▲' : 'DBG'}</Text>
+            </TouchableOpacity>
         
       </View>
       <TouchableWithoutFeedback onPress={onPreviewTap}>
@@ -1144,34 +1531,13 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
     
    
   <View pointerEvents="none" style={[styles.absoluteOverlay, { width: previewSize?.width ?? '100%', height: previewSize?.height ?? '100%' }]}> 
-               {previewSize && (
-                 <>
-                   
-                   <View
-                     style={[
-                       styles.crosshairVertical,
-                       { left: Math.round(centerX) - Math.round(CROSSHAIR_THICKNESS / 2), height: Math.round(previewSize.height * lengthFactor) + Math.round(CROSSHAIR_CONTAINER_SIZE), top: Math.round(previewSize.height * ((1 - lengthFactor) / 2)) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), width: CROSSHAIR_THICKNESS },
-                     ]}
-                   />
-
-                   <View
-                     style={[
-                       styles.crosshairHorizontal,
-                       { top: Math.round(centerY) - Math.round(CROSSHAIR_THICKNESS / 2), width: Math.round(previewSize.width * lengthFactor) + Math.round(CROSSHAIR_CONTAINER_SIZE), left: Math.round(previewSize.width * ((1 - lengthFactor) / 2)) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), height: CROSSHAIR_THICKNESS },
-                     ]}
-                   />
-                   <View pointerEvents="none" style={[styles.fillerBar, { left: Math.round(centerX) - Math.round((CROSSHAIR_CONTAINER_SIZE * 1.2) / 2), top: Math.round(centerY) - Math.round((CROSSHAIR_THICKNESS + 1) / 2), width: Math.round(CROSSHAIR_CONTAINER_SIZE * 1.2), height: CROSSHAIR_THICKNESS + 1 }]} />
-                   <View pointerEvents="none" style={[styles.fillerBar, { left: Math.round(centerX) - Math.round((CROSSHAIR_THICKNESS + 1) / 2), top: Math.round(centerY) - Math.round((CROSSHAIR_CONTAINER_SIZE * 1.2) / 2), width: CROSSHAIR_THICKNESS + 1, height: Math.round(CROSSHAIR_CONTAINER_SIZE * 1.2) }]} />
-                 </>
-               )}
-
                {tapMarker && previewSize && (
                  <View style={styles.tapMarkerRoot} pointerEvents="none">
                    <View style={[styles.tapMarkerDot, { left: Math.round(tapMarker.x - (18/2)), top: Math.round(tapMarker.y - (18/2)) }]} />
                  </View>
                )}
 
-               {freeze && crosshairPos ? (
+               {freeze && crosshairPos && (
                  <View
                    pointerEvents="none"
                    style={[
@@ -1185,24 +1551,54 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
                      <View style={[styles.crosshairLineBase, { height: 2, width: CROSSHAIR_CONTAINER_SIZE * 2 }]} />
                    </View>
                  </View>
-               ) : (
-                 previewSize && (
-                   <View
-                     pointerEvents="none"
-                     style={[
-                       styles.crosshairContainer,
-                       { width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE, left: Math.round(previewSize.width / 2) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2), top: Math.round(previewSize.height / 2) - Math.round(CROSSHAIR_CONTAINER_SIZE / 2) },
-                     ]}
-                   >
-                     <View style={[styles.crosshairInner, { width: CROSSHAIR_CONTAINER_SIZE, height: CROSSHAIR_CONTAINER_SIZE }]}>
-                       <View style={[{ width: CROSSHAIR_DOT_SIZE, height: CROSSHAIR_DOT_SIZE, borderRadius: Math.round(CROSSHAIR_DOT_SIZE/2) }, styles.crosshairDotBase]} />
-                       <View style={[styles.crosshairLineBase, { width: 2, height: CROSSHAIR_CONTAINER_SIZE * 2 }]} />
-                       <View style={[styles.crosshairLineBase, { height: 2, width: CROSSHAIR_CONTAINER_SIZE * 2 }]} />
-                     </View>
-                   </View>
-                 )
                )}
     </View>
+
+            {/* Warning message display */}
+            {whiteBalanceStatus.status !== 'ok' && leftBoxEnabled && (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningText}>{whiteBalanceStatus.message}</Text>
+              </View>
+            )}
+
+            {/* Reference boxes */}
+            {!freeze && previewSize && (
+              <View style={styles.referenceBoxContainer}>
+                {/* Left box - White reference */}
+                <View style={styles.referenceBoxWrapper}>
+                  <View style={[
+                    styles.referenceBox,
+                    leftBoxEnabled ? {} : styles.referenceBoxDisabled,
+                    { width: getReferenceBoxPixelSize(), height: getReferenceBoxPixelSize() }
+                  ]} />
+                  <Text style={styles.referenceBoxLabel}>Place white paper here</Text>
+                  <View style={styles.referenceBoxControls}>
+                    <TouchableOpacity style={styles.sizeButton} onPress={() => handleReferenceBoxSizeChange(-0.05)}>
+                      <Text style={styles.sizeButtonText}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.sizeText}>{(referenceBoxSizeInches * 10).toFixed(1)}</Text>
+                    <TouchableOpacity style={styles.sizeButton} onPress={() => handleReferenceBoxSizeChange(0.05)}>
+                      <Text style={styles.sizeButtonText}>+</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.toggleButton} 
+                      onPress={() => setLeftBoxEnabled(!leftBoxEnabled)}
+                    >
+                      <Text style={styles.toggleButtonText}>{leftBoxEnabled ? '✓' : '⊘'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Right box - Color to measure */}
+                <View style={styles.referenceBoxWrapper}>
+                  <View style={[
+                    styles.referenceBox,
+                    { width: getReferenceBoxPixelSize(), height: getReferenceBoxPixelSize() }
+                  ]} />
+                  <Text style={styles.referenceBoxLabel}>Put color to measure here</Text>
+                </View>
+              </View>
+            )}
           </View>
           
           {selectedImageUri && (
@@ -1220,6 +1616,18 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
               )}
             </View>
           )}
+          {/* Debug overlay (always visible on preview or image when toggled) */}
+          {debugVisible && (
+            <View pointerEvents="none" style={{ position: 'absolute', left: 8, top: 8, zIndex: 9999, elevation: 99, backgroundColor: 'rgba(0,0,0,0.85)', padding: 10, borderRadius: 8, borderWidth: 2, borderColor: '#FFD700' }}>
+              <Text style={{ color: '#FFD700', fontSize: 14, fontWeight: 'bold', marginBottom: 2 }}>DBG PANEL</Text>
+              <Text style={{ color: '#fff', fontSize: 13 }}>Left median: {debugLeftMedian ? `${debugLeftMedian.r}, ${debugLeftMedian.g}, ${debugLeftMedian.b}` : '—'}</Text>
+              <Text style={{ color: '#fff', fontSize: 13 }}>Patch white frac: {typeof debugLeftFraction === 'number' ? debugLeftFraction.toFixed(2) : (debugLeftFraction === null ? 'N/A' : '—')}</Text>
+              <Text style={{ color: '#fff', fontSize: 13 }}>Gains: {debugGains ? `${debugGains.gr.toFixed(3)}, ${debugGains.gg.toFixed(3)}, ${debugGains.gb.toFixed(3)}` : '—'}</Text>
+              <Text style={{ color: '#fff', fontSize: 13 }}>Corrected R: {debugCorrectedRight ? `${debugCorrectedRight.r}, ${debugCorrectedRight.g}, ${debugCorrectedRight.b}` : '—'}</Text>
+              <Text style={{ color: '#fff', fontSize: 13 }}>Raw Right: {debugRightRaw ? `${debugRightRaw.r}, ${debugRightRaw.g}, ${debugRightRaw.b}` : '—'}</Text>
+              <Text style={{ color: '#fff', fontSize: 13 }}>Right match: {debugRightMatch ?? '—'}</Text>
+            </View>
+          )}
         </View>
       </TouchableWithoutFeedback>
 
@@ -1233,10 +1641,48 @@ const ColorDetector: React.FC<ColorDetectorProps> = ({ onBack, openSettings, voi
         )}
 
         <View style={styles.infoArea}>
-          
-          <View style={styles.inlineSwatchRow}>
-            <View style={[styles.swatchBoxLarge, { backgroundColor: displayDetected?.hex || '#000', opacity: adjusting ? 0 : 1 }]} />
+
+          {/* Replaced big swatch with always-visible dual swatches for debugging
+              - Left: Actual detected color (camera sample) with RGB + hex
+              - Right: Matched color from dataset (displayDetected)
+              Shows placeholders when actual sample isn't available. */}
+          <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>
+            <Text style={{ color: '#666', fontSize: 12, marginBottom: 6, fontWeight: '600' }}>Actual Detected vs Matched:</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
+              {/* Actual detected RGB swatch */}
+              <View style={{ alignItems: 'center', marginRight: 10 }}>
+                <View style={{ 
+                  width: 80, 
+                  height: 80, 
+                  borderRadius: 8, 
+                  backgroundColor: debugRightRaw ? rgbToHex(debugRightRaw.r, debugRightRaw.g, debugRightRaw.b) : '#777777',
+                  borderWidth: 2,
+                  borderColor: '#ccc',
+                  marginBottom: 4
+                }} />
+                <Text style={{ fontSize: 11, color: '#333', fontWeight: '600' }}>Detected</Text>
+                <Text style={{ fontSize: 10, color: '#666' }}>{debugRightRaw ? rgbToHex(debugRightRaw.r, debugRightRaw.g, debugRightRaw.b) : '—'}</Text>
+                <Text style={{ fontSize: 9, color: '#999' }}>{debugRightRaw ? `RGB: ${debugRightRaw.r}, ${debugRightRaw.g}, ${debugRightRaw.b}` : 'Waiting...'}</Text>
+              </View>
+
+              {/* Matched color swatch */}
+              <View style={{ alignItems: 'center', marginLeft: 10 }}>
+                <View style={{ 
+                  width: 80, 
+                  height: 80, 
+                  borderRadius: 8, 
+                  backgroundColor: displayDetected?.hex || '#000000',
+                  borderWidth: 2,
+                  borderColor: '#FFD700',
+                  marginBottom: 4
+                }} />
+                <Text style={{ fontSize: 11, color: '#333', fontWeight: '600' }}>Matched</Text>
+                <Text style={{ fontSize: 10, color: '#666' }}>{displayDetected?.hex || '—'}</Text>
+                <Text style={{ fontSize: 9, color: '#999' }}>{displayDetected?.realName || '—'}</Text>
+              </View>
+            </View>
           </View>
+
           {showFamily && (
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Family of:</Text>

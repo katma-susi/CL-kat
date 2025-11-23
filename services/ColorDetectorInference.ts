@@ -22,13 +22,32 @@ function scaleLabForModel(l: number, a: number, b: number) {
 function preprocessRGBForShadow(rgb: { r: number; g: number; b: number }) {
   // Make a simple, fast preprocessing step to reduce shadow/overexposure issues
   // Strategy:
-  // - If pixel is very dark, boost chromaticity and set a reasonable intensity
+  // - Check if pixel is too dark/invalid (V < 0.08 or L < 5); if so, skip or recover
+  // - If pixel is very dark but has chromatic info, boost chromaticity and set a reasonable intensity
   // - If pixel is very bright, slightly clamp to avoid wash-out
   // - Apply light gamma correction for dark pixels
   try {
     let { r, g, b } = rgb;
     r = Math.round(r); g = Math.round(g); b = Math.round(b);
     const avg = (r + g + b) / 3;
+
+    // Check HSV Value (V = max(r,g,b) / 255)
+    const maxRGB = Math.max(r, g, b);
+    const hsvValue = maxRGB / 255;
+    
+    // Check LAB Lightness approximation: L = 0.299*R + 0.587*G + 0.114*B (simplified)
+    const labLApprox = (0.299 * r + 0.587 * g + 0.114 * b) / 255 * 100;
+
+    // Skip or recover too-dark samples (V < 0.08 or L < 5)
+    if (hsvValue < 0.08 || labLApprox < 5) {
+      // Very dark; likely noise or invalid. Try to recover by boosting with a baseline
+      const sum = (r + g + b) || 1;
+      const nr = r / sum; const ng = g / sum; const nb = b / sum;
+      const recoveredIntensity = 80; // Set a minimum baseline for recovery
+      r = Math.round(nr * recoveredIntensity);
+      g = Math.round(ng * recoveredIntensity);
+      b = Math.round(nb * recoveredIntensity);
+    }
 
     let outR = r, outG = g, outB = b;
 
